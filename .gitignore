@@ -218,3 +218,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local monitoring data and configuration
+data/
+*.db*
+config.local.json
+*.pem
+*.key
