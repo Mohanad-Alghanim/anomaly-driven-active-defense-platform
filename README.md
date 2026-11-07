@@ -1,94 +1,133 @@
-# Six-Attack Security Monitoring System
+# Six-Attack SOC Monitoring System
 
-A lightweight local SOC dashboard for Kali Linux, built with Python, Streamlit and SQLite. Exactly six rule categories produce indicators of possible attacks. Rule matches require investigation; they are not proof of malicious activity. No Codex, cloud service, AI, containers or paid API is needed to operate it.
+A lightweight, local SOC dashboard for Kali Linux using Python, Streamlit and SQLite. A background collector monitors configured telemetry independently of Firefox. Exactly six transparent rule categories identify possible suspicious activity; a match is an indicator to investigate, not proof of an attack.
 
-## Install and start
+No Codex, cloud API, AI, paid service, Docker or external monitoring platform is required during operation.
 
-Python 3.10 or newer is required (locally tested with Python 3.14).
+## Install once, then use the desktop
+
+Python 3.10+ and a normal Kali desktop user are required. Locally tested with Python 3.14 / Streamlit 1.66.1.
 
 ```bash
 git clone https://github.com/Mohanad-Alghanim/six-attack-security-monitor.git
 cd six-attack-security-monitor
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-cp config.example.json config.local.json
-chmod +x start.sh
-./start.sh
+.venv/bin/python -m monitor.install --prepare
 ```
 
-Open http://localhost:8501. Stop with **Ctrl+C**. If venv support is missing, install Kali's `python3-venv` package through your usual package management process. Initial dependency installation requires internet or locally supplied wheels; operation after installation is offline. The server binds to localhost.
+For an existing checkout, update the code and dependencies, then run only the preparation command. Existing `config.local.json` content and recorded databases are preserved. Preparation adds user services and application/desktop launchers. It does **not** enable or start a listener. No sudo, system service, SSH enablement, firewall change, packet capture or linger setting is used.
 
-## Demonstration
+1. Open **Activate SOC Monitoring** from the applications menu (or desktop). It asks before enabling login startup and starting the collector and localhost dashboard.
+2. Open **Six-Attack SOC** to launch Firefox at **http://127.0.0.1:8501**.
+3. Keep using Kali normally. Closing Firefox or a terminal does not stop collection.
+4. On subsequent user logins, systemd starts both services automatically. Open Six-Attack SOC whenever needed.
 
-Select **Demonstration** and click **Run six-category demonstration**. Each run replaces the previous demo dataset with 74 simulated events, 68 NORMAL and 6 ABNORMAL, producing one alert per category under default thresholds. Earlier events contributing to a threshold remain NORMAL until a rule actually triggers. The button never executes an attack or makes a network request.
+The graphical confirmation uses Zenity when available, otherwise Python's tkinter. If your desktop marks a new desktop file untrusted, use its normal **Allow Launching** / executable launcher action, or launch it from the applications menu. A minimal Kali install may need its normal `python3-venv` and `python3-tk` packages installed by its administrator. Initial package installation requires internet or locally supplied wheels; normal operation is offline.
 
-Demo and live data use separate SQLite databases under ignored `data/`. Documentation-only IP addresses are used. `samples/demo.jsonl` supplies a saved, deterministic dataset; its timestamps are fixed. Use the built-in button for fresh timestamps. Sample timestamps can be rebased when replaying them into a current time view. Identical imported events are idempotent.
+**Current delivery environment:** service files and launchers were prepared, but activation and an actual browser server could not be verified because the development sandbox blocks the systemd user bus and network sockets. One-time graphical activation remains necessary on the real Kali desktop. See [validation evidence](docs/VALIDATION.md).
 
-## Sources and configuration
+## Day-to-day workflow
 
-`config.local.json` is ignored by Git. Set `SIX_CONFIG` to select another configuration file and `SIX_DATA` to choose a database directory. Configuration is loaded on a full dashboard rerun.
+Start Kali, log in, open Six-Attack SOC, and use your separate terminal to perform authorised testing against your designated isolated lab target. The target's **existing, readable telemetry** must record that activity. The collector reads new records, the six rules evaluate them, and the dashboard refreshes every three seconds. Events and alerts persist across supported collector/service restarts.
+
+Authentication Journal access alone does not provide firewall or HTTP telemetry. SSH is not enabled by this application. If SSH is inactive or a target does not export suitable logs, the corresponding activity cannot be detected. Source health and per-category requirements are shown explicitly. A readable source is not proof of complete event coverage.
+
+## Six categories and telemetry
+
+| Category | Default indicator | Supported source |
+| --- | --- | --- |
+| SSH Brute Force | 5 failed SSH logins from one IP in 60 seconds | Persistent local authentication Journal or `auth` / normalized records |
+| Port Scanning | 15 distinct destination ports from one IP in 60 seconds | Existing netfilter/UFW logs or normalized connection records |
+| SQL Injection | Predefined suspicious SQL request patterns | Apache/Nginx common/combined access logs or normalized HTTP records |
+| Denial of Service (DoS) | 50 HTTP requests from one IP in 10 seconds | Same HTTP request sources |
+| Unauthorized File Modification | Content changed without matching approved hash | Explicitly selected readable lab files |
+| Suspicious Privilege Escalation | Predefined suspicious sudo/su/authentication/command patterns | Local authentication Journal or `auth` / normalized privilege records |
+
+No other attack categories are implemented. Normal sudo/su sessions and routine privileged commands do not automatically trigger alerts. The selected patterns include sudoers denial, privilege authentication failure, and particular shell/setuid/admin-group commands. Some legitimate administrative commands can match; investigate the context.
+
+## Configure your actual lab sources
+
+Edit ignored `config.local.json` in a text editor. The default enables read-only local authentication Journal queries and leaves other telemetry unconfigured. [config.lab.example.json](config.lab.example.json) illustrates available source adapters; its paths are placeholders, not ready-to-use sources.
 
 ```json
 {
-  "ssh_count": 5, "ssh_window": 60,
-  "port_count": 15, "port_window": 60,
-  "dos_count": 50, "dos_window": 10,
+  "journal": {"enabled": true, "lookback_seconds": 300, "kernel_netfilter": false},
   "sources": [
-    {"path": "/path/to/readable/auth.log", "format": "auth"},
-    {"path": "/path/to/normalized-traffic.jsonl", "format": "jsonl"}
+    {"path": "/path/to/existing/lab-access.log", "format": "http_access", "destination": "isolated-lab", "destination_port": 8080},
+    {"path": "/path/to/existing/lab-firewall.log", "format": "netfilter"},
+    {"path": "/path/to/existing/normalized.jsonl", "format": "jsonl", "kinds": ["ssh_failed", "connection", "http", "privilege"]}
   ],
-  "files": [{"path": "/path/to/test-file.txt"}]
+  "files": [{"path": "/path/to/explicitly-selected/lab-file.txt"}]
 }
 ```
 
-| Category | Required telemetry | Default rule |
-| --- | --- | --- |
-| SSH Brute Force | Readable OpenSSH authentication log or normalized `ssh_failed` records | 5 failures/IP within 60 seconds |
-| Port Scanning | Firewall/connection records with destination ports | 15 distinct ports/IP within 60 seconds |
-| SQL Injection | HTTP request records including request text | Predefined SQL patterns |
-| Denial of Service (DoS) | HTTP request records | 50 requests/IP within 10 seconds |
-| Unauthorized File Modification | Explicitly configured test files | Content hash changes without approved hash |
-| Suspicious Privilege Escalation | sudo/su authentication or normalized privilege records | Predefined suspicious privilege patterns |
+Use absolute paths for deployment. Configuration is reloaded by the collector each cycle; refresh the browser after editing it so its displayed coverage settings update too. Existing configurations without a `journal` key inherit the new default enabled Journal query. `kinds` declares intended JSONL coverage for the status table; it does not synthesize records or enable a detector source. An undeclared JSONL source is still read, but is not claimed as category coverage.
 
-The auth adapter handles traditional syslog `Failed password` and sudo/su records. Journald-only installations must export logs to readable files or normalize records externally. Traditional syslog lacks a year; the adapter infers the current local year. It does not support every SSH failure or authentication log format. No permissions or system security settings are changed.
+The Kali user must already have permission to read these sources. We do not change system log permissions or group membership. For a different lab machine, local Journal records describe **Kali**, not that remote target. Make the target's logs available through an already approved readable shared file or existing log forwarding facility. This application adds no remote listener or automatic remote administration. See [lab telemetry setup](docs/LAB_TELEMETRY.md).
 
-HTTP and firewall telemetry must be supplied as normalized JSONL. This application does not sniff packets or automatically parse arbitrary web server logs. The dashboard shows configured source read status and a category/source requirements table. A configured JSONL file does not guarantee it contains every required event kind.
+## Dashboard and demonstration
 
-Each JSONL line needs numeric Unix `ts` (UTC seconds), `kind`, and string `message`. Optional fields are `ip`, `port`, `authorized`, and `id`. Supported kinds: `normal`, `ssh_failed`, `connection`, `http`, `file`, `privilege`. A connection event requires a valid destination port. Example:
+The default view is **Live monitoring**. It shows collector heartbeat/state, source availability, last processed event/time, event counts, attack distribution, timeline, recent alerts with severity, source/destination details, event details, and category/time filters. Alert records link event time and detection time to the rule, explanation and recommended action. Read-only queries fetch at most 1,000 recent details; totals and charts cover the full selected time range.
 
-```json
-{"ts":1794042000,"kind":"connection","ip":"192.0.2.10","port":443,"message":"Firewall connection attempt"}
+Choose **Demonstration** and click its button to replace the isolated demo dataset with a fresh scenario. At default thresholds: **74 events, 68 NORMAL, 6 ABNORMAL, 6 alerts**. This simulates records only; it does not run attacks. Demo and live databases are always separate. Saved examples are in `samples/`; adapter fixtures in `samples/lab/` are synthetic, including their Journal cursor strings. Automated integration tests use temporary databases, not the real live database.
+
+## Reliability and storage
+
+- One collector per data directory, enforced with a process lock. It persists Journal cursors, log byte offsets, file hashes and health in SQLite.
+- Cursor commits follow event commits, so an interruption replays safely. Duplicate event IDs and alert cooldowns prevent duplicate ingestion/alerts.
+- Expired Journal cursors recover from the last saved timestamp with a two-second overlap. First startup reads the previous five minutes by default. Logs already vacuumed away cannot be recovered.
+- Log reads are bounded (1,000 lines/source/poll by default); partial lines wait for their newline, oversized records are skipped and reported. Inode rotation/detected truncation restarts reading. Same-inode replacement and copy/truncate races are not lossless; retain source logs as needed.
+- SQLite WAL and a busy timeout support concurrent collector writes and dashboard reads. Existing project databases migrate additively. All matched events now retain category details even when a repeat alert is suppressed; older suppressed events keep their original stored status without retroactive rule evaluation.
+- Default capacity: 200,000 events / approximately 256 MiB database plus WAL, with bounded batch/check overshoot. At capacity, ingestion pauses visibly; history is not silently deleted. Archive and configure a new data directory or explicitly adjust the limits. Free space and source-log retention remain the operator's responsibility.
+- New data is private to the user (directory 0700, files 0600 via umask). Preparation tightens permissions only on this application's own data/config, never system log permissions. No event payloads are printed to service logs.
+- User services have restart backoff, CPU/memory limits and a private umask. Collection continues while the user is logged in. Logout/shutdown normally stops user services; they resume at next login. Linger is not enabled.
+
+Threshold windows use event timestamps and inclusive boundaries. Earlier contributors keep NORMAL until a rule actually triggers. Late events do not retroactively reclassify older records. NORMAL means no configured rule matched. SQL patterns are intentionally limited; access-log requests are URL-decoded once. The normalizer does not interpret arbitrary custom log layouts, proxy trust chains or HTTP request bodies. File hashing detects content, not permissions/metadata; changes and reversions between polls may be missed. These are educational rules, not a comprehensive intrusion detection platform.
+
+## Status, recovery and stopping
+
+Use **SOC Monitoring Status** for graphical service state; use **Restart SOC Monitoring** for graphical recovery. The restart asks before starting/restarting the localhost service and preserves database progress. Service logs are accessible through the normal desktop journal viewer, if installed.
+
+Optional terminal administration (not needed for routine operation):
+
+```bash
+# One-time activation without the GUI
+.venv/bin/python -m monitor.install --activate
+
+systemctl --user status six-soc-collector.service six-soc-dashboard.service
+systemctl --user restart six-soc-collector.service six-soc-dashboard.service
+journalctl --user -u six-soc-collector.service -u six-soc-dashboard.service -n 50 --no-pager
+
+# Stop now; enabled services resume at next login
+systemctl --user stop six-soc-dashboard.service six-soc-collector.service
+
+# Disable login startup and stop both
+systemctl --user disable --now six-soc-dashboard.service six-soc-collector.service
 ```
 
-Only supply `authorized: true` on normalized file events from a trusted producer. For built-in file monitoring, compute the intended new file's SHA-256 and place it in the entry's `authorized_sha256` field **before** applying the change. The first observation establishes the baseline. Unauthorized content changes trigger alerts; metadata-only changes do not. Changes and reversions between polls can be missed. File deletion/read failures appear as source errors. Use test files rather than sensitive system files.
+For an upgrade, restart both services after preparation. If repeated failures exhaust systemd's start limit, run `systemctl --user reset-failed six-soc-collector.service six-soc-dashboard.service` then restart. The dashboard's stale heartbeat warning helps distinguish an inactive collector from quiet traffic. A bind failure may mean port 8501 is occupied: inspect service logs and resolve the conflict yourself rather than terminating unrelated processes.
 
-## Processing behavior
+Manual development fallback: run `.venv/bin/python -m monitor.worker` independently, then `./start.sh` for the dashboard. Stop each with Ctrl+C. `SIX_CONFIG` and `SIX_DATA` override paths for these commands; generated services use explicit project-local paths. Do not run the dashboard as root.
 
-Append newline-terminated records in timestamp order. Durable byte offsets prevent rereading on refresh. Inode rotation and detected truncation restart reading. At most 5,000 lines per source are read per refresh. Invalid lines are skipped; a per-poll rejection count is shown. The collector cannot detect every in-place rewrite or copy/truncate race, and does not read the remainder of renamed rotated logs. Keep rotated logs externally if needed.
-
-NORMAL means no configured rule matched. A triggering event is ABNORMAL. Every alert includes attack name, processing/detection time, source IP if available, severity, triggered rule, description, recommendation, event time and event ID. Earlier events contributing to a threshold keep their original classification.
-
-Threshold rules suppress duplicate alerts for the same category/IP during the corresponding rule window; repeated matching events still become ABNORMAL. Identical event IDs are not processed twice. Imported log IDs are derived from source/inode/offset/content. Multiple sources sharing an IP contribute to the same rule window. Time/category filters apply to event time; category views display alert-linked events, while All includes suppressed matching events.
-
-SQL patterns cover UNION SELECT, quoted OR 1=1, semicolon DROP TABLE and SQL comments. Privilege patterns cover authentication failures, sudoers denial, and shell/setuid/admin-group commands. Expressions are defined in `monitor/core.py`; thresholds/windows are configurable positive integers. Encoded HTTP payloads are not decoded. Predefined patterns can produce false positives and miss attacks. Late/out-of-order events do not retroactively re-evaluate earlier events. Imported timestamps are trusted.
-
-Collection runs every three seconds while the dashboard has an active browser session. There is no background daemon; closing the browser or stopping Streamlit stops collection. The app reads persisted data again when reopened. SQLite uses WAL, parameterized values and transactional processing. For long-running deployments, add suitable retention and a dedicated collector; this project deliberately keeps both simple. Stop the application before archiving/removing database files. Protect databases and logs with normal filesystem permissions.
-
-## Structure and tests
-
-```text
-app.py                    Streamlit dashboard and refresh
-monitor/core.py           Six rules, ingestion, normalization, SQLite
-monitor/demo.py           Safe, deterministic demonstration scenarios
-samples/demo.jsonl        Saved sample telemetry
-config.example.json       Configurable thresholds and sources
-start.sh                  Independent local startup
-tests/test_monitor.py    Automated rule/integration/dashboard tests
-docs/VALIDATION.md       Local validation evidence and limitations
-```
+## Tests and project layout
 
 ```bash
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Tests cover all six rules, normal classification, boundaries, IP isolation, alert fields, persistence, deduplication, file authorization, invalid input, incremental ingestion and Streamlit startup/demo/filter rendering. No real-world attack detection is claimed. See [validation notes](docs/VALIDATION.md) for the tested environment and limits.
+See [validation evidence](docs/VALIDATION.md) for actual results and unverified items. The suite exercises six rules, normalization, durable cursors, expired-cursor recovery, log ingestion, database migration/persistence, process restarts without a browser, duplicate suppression, source health, concurrency, resource limits, dashboard rendering, and the synthetic six-category telemetry-to-alert path. It does not execute real attacks.
+
+```text
+app.py                     Read-only live dashboard, separate demo controls
+monitor/core.py            Existing six rules, storage and additive migration
+monitor/adapters.py        Auth, Journal, HTTP and firewall normalization
+monitor/collectors.py      Incremental file readers and integrity checks
+monitor/journal.py         Bounded Journal queries and durable cursor recovery
+monitor/worker.py          Independent collector lifecycle and health
+monitor/views.py           Bounded dashboard queries and source coverage
+monitor/install.py         User-service and graphical launcher installation
+deploy/                    systemd user-service templates
+samples/                   Synthetic saved telemetry and adapter fixtures
+tests/                     Automated rule, lifecycle and integration tests
+```
