@@ -14,7 +14,7 @@ CATEGORIES = ('SSH Brute Force', 'Port Scanning', 'SQL Injection', 'Denial of Se
 DEFAULT = dict(ssh_count=5, ssh_window=60, port_count=15, port_window=60, dos_count=50, dos_window=10, sources=[], files=[], poll_seconds=2, batch_lines=1000, max_line_bytes=65536, max_file_bytes=33554432, max_events=200000, max_database_bytes=268435456, journal={'enabled': True, 'lookback_seconds': 300})
 ACTIONS = ('Review SSH activity; restrict access and use keys.', 'Review firewall telemetry and restrict unnecessary ports.', 'Review application logs and use parameterized queries.', 'Review traffic and apply suitable rate limits.', 'Verify the change with the owner and restore a trusted copy if needed.', 'Review privileged commands and account permissions.')
 SQL = re.compile(r"union\s+(?:all\s+)?select|(?:'|\")\s*or\s+['\"]?1['\"]?\s*=\s*['\"]?1|;\s*drop\s+table|--", re.I)
-PRIV = re.compile(r'authentication failure|not in the sudoers|COMMAND=.*(?:/bin/(?:ba)?sh|chmod\s+[+]s|usermod\s+.*-aG\s+sudo)', re.I)
+PRIV = re.compile(r'LAB_PRIVILEGE_DENIED operation=(?:setuid target_uid=0|capset capability=CAP_SETUID) errno=1\b|authentication failure|not in the sudoers|COMMAND=.*(?:/bin/(?:ba)?sh|chmod\s+[+]s|usermod\s+.*-aG\s+sudo)', re.I)
 
 
 def now():

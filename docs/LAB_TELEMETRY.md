@@ -1,4 +1,6 @@
-# Connecting an isolated lab target
+# Optional external telemetry adapters
+
+The bundled local lab is provisioned automatically with `monitor.install --prepare-lab`; see the root TESTING_GUIDE.md. The following is advanced documentation for additional existing sources, not per-test setup for the bundled lab.
 
 The application is a consumer of telemetry. A successful lab request or test is visible only if the designated target records an event in a configured source. Monitoring does not enable SSH, capture packets, change firewall logging, create a web target, or expose a new ingestion endpoint.
 

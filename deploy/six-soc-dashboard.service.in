@@ -7,7 +7,7 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-WorkingDirectory="@ROOT@"
+WorkingDirectory=@WORKDIR@
 Environment="SIX_CONFIG=@CONFIG@"
 Environment="SIX_DATA=@DATA@"
 ExecStart="@PYTHON@" -m streamlit run "@ROOT@/app.py" --server.address 127.0.0.1 --server.port 8501 --server.headless true --browser.gatherUsageStats false
