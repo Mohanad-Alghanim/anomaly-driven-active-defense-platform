@@ -225,3 +225,8 @@ data/
 config.local.json
 *.pem
 *.key
+
+# Live telemetry and local validation artifacts
+logs/
+.local-validation/
+*.lock

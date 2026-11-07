@@ -1,0 +1,7 @@
+{"__CURSOR": "synthetic:auth:0", "__REALTIME_TIMESTAMP": "1794042000000000", "SYSLOG_IDENTIFIER": "sshd", "_HOSTNAME": "isolated-lab", "MESSAGE": "Failed password for invalid user student from 192.0.2.10 port 44000 ssh2"}
+{"__CURSOR": "synthetic:auth:1", "__REALTIME_TIMESTAMP": "1794042001000000", "SYSLOG_IDENTIFIER": "sshd", "_HOSTNAME": "isolated-lab", "MESSAGE": "Failed password for invalid user student from 192.0.2.10 port 44000 ssh2"}
+{"__CURSOR": "synthetic:auth:2", "__REALTIME_TIMESTAMP": "1794042002000000", "SYSLOG_IDENTIFIER": "sshd", "_HOSTNAME": "isolated-lab", "MESSAGE": "Failed password for invalid user student from 192.0.2.10 port 44000 ssh2"}
+{"__CURSOR": "synthetic:auth:3", "__REALTIME_TIMESTAMP": "1794042003000000", "SYSLOG_IDENTIFIER": "sshd", "_HOSTNAME": "isolated-lab", "MESSAGE": "Failed password for invalid user student from 192.0.2.10 port 44000 ssh2"}
+{"__CURSOR": "synthetic:auth:4", "__REALTIME_TIMESTAMP": "1794042004000000", "SYSLOG_IDENTIFIER": "sshd", "_HOSTNAME": "isolated-lab", "MESSAGE": "Failed password for invalid user student from 192.0.2.10 port 44000 ssh2"}
+{"__CURSOR": "synthetic:auth:5", "__REALTIME_TIMESTAMP": "1794042005000000", "SYSLOG_IDENTIFIER": "sudo", "_HOSTNAME": "isolated-lab", "MESSAGE": "student : TTY=pts/1 ; USER=root ; COMMAND=/usr/bin/id"}
+{"__CURSOR": "synthetic:auth:6", "__REALTIME_TIMESTAMP": "1794042006000000", "SYSLOG_IDENTIFIER": "sudo", "_HOSTNAME": "isolated-lab", "MESSAGE": "student : user NOT in the sudoers"}

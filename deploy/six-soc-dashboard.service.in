@@ -1,0 +1,23 @@
+[Unit]
+Description=Six-Attack SOC localhost dashboard
+Wants=six-soc-collector.service
+After=six-soc-collector.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory="@ROOT@"
+Environment="SIX_CONFIG=@CONFIG@"
+Environment="SIX_DATA=@DATA@"
+ExecStart="@PYTHON@" -m streamlit run "@ROOT@/app.py" --server.address 127.0.0.1 --server.port 8501 --server.headless true --browser.gatherUsageStats false
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=yes
+CPUQuota=80%
+MemoryMax=1G
+
+[Install]
+WantedBy=default.target

@@ -1,10 +1,13 @@
 """Local Streamlit SOC dashboard. Run using start.sh."""
 from pathlib import Path
 import os
+import sqlite3
+from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
-from monitor.core import Engine, CATEGORIES, config, collect, now
+from monitor.core import Engine, CATEGORIES, config, now
 from monitor.demo import events
+from monitor.views import collector_health, coverage, snapshot
 
 st.set_page_config(page_title='Six-Attack SOC', page_icon='🛡️', layout='wide')
 st.markdown('''<style>
@@ -14,7 +17,7 @@ h1 {color: #68d9ef}
 </style>''', unsafe_allow_html=True)
 st.title('🛡️ Six-Attack Security Monitor')
 st.caption('LOCAL SOC • Rule-based indicators • Possible suspicious activity requires investigation')
-mode = st.sidebar.radio('Data environment', ['Demonstration', 'Live monitoring'])
+mode = st.sidebar.radio('Data environment', ['Live monitoring', 'Demonstration'])
 category = st.sidebar.selectbox('Attack category', ['All', *CATEGORIES])
 hours = st.sidebar.selectbox('Time range (hours)', [1, 24, 168, 8760], index=1)
 st.sidebar.caption('Refreshes every 3 seconds while this dashboard is open.')
@@ -28,47 +31,81 @@ data = Path(os.environ.get('SIX_DATA', 'data'))
 
 @st.fragment(run_every=3)
 def dashboard():
-    engine = Engine(data / ('demo.db' if mode == 'Demonstration' else 'live.db'), settings)
+    path = data / ('demo.db' if mode == 'Demonstration' else 'live.db')
+    if mode == 'Live monitoring' and not path.exists():
+        st.warning('Collector not started. Use the installed Activate SOC Monitoring launcher for one-time setup.')
+        engine = Engine(':memory:', settings)
+    else:
+        try:
+            engine = Engine(path, settings, readonly=mode == 'Live monitoring')
+        except sqlite3.Error as exc:
+            st.error('Database unavailable: ' + str(exc))
+            return
+    if mode == 'Live monitoring' and engine.db.execute('PRAGMA user_version').fetchone()[0] < 2 and path.exists():
+        st.warning('Database upgrade pending. Start the upgraded collector to migrate existing data safely.')
+        engine.close()
+        return
     try:
         if mode == 'Demonstration':
             st.info('SIMULATED DATA — isolated from live monitoring. Each run replaces the previous demo dataset.')
             if st.button('Run six-category demonstration'):
                 with engine.db:
+                    engine.db.execute('DELETE FROM matches')
                     engine.db.execute('DELETE FROM alerts')
                     engine.db.execute('DELETE FROM events')
+                engine.event_count = 0
                 for event in events():
                     engine.process(event)
             statuses = [dict(source='Built-in demonstration', status='Available; no attacks executed')]
         else:
-            statuses = collect(engine)
-            st.caption('Collection runs during refresh. JSONL supplies HTTP/firewall telemetry; auth logs supply SSH/sudo events; file entries monitor content hashes.')
+            health = collector_health(engine, settings['poll_seconds'])
+            statuses = health.get('sources', [])
+            status = health['status']
+            if status == 'RUNNING':
+                st.success('Background collector: RUNNING • independent of Firefox')
+            else:
+                st.warning('Background collector: ' + status)
+            if health.get('error'):
+                st.error(health['error'])
+            last = health.get('last_event')
+            if last is None:
+                import json
+                last = json.loads(engine.state('last_event') or 'null')
+            def stamp(value):
+                return datetime.fromtimestamp(value, timezone.utc).isoformat() if value else 'None yet'
+            st.caption('Last heartbeat: ' + stamp(health.get('heartbeat')) +
+                       ' | Last successful event: ' + stamp(last.get('event_ts') if last else None) +
+                       ' | Last processed: ' + stamp(last.get('processed_ts') if last else None))
         cutoff = now() - hours * 3600
-        alerts = [a for a in engine.rows('alerts') if a['event_ts'] >= cutoff and (category == 'All' or a['attack'] == category)]
-        all_events = engine.rows('events')
-        ids = {a['event_id'] for a in alerts}
-        ev = [e for e in all_events if e['ts'] >= cutoff and (category == 'All' or e['id'] in ids)]
-        normal = sum(e['status'] == 'NORMAL' for e in ev)
+        engine.db.execute('BEGIN')
+        try:
+            view = snapshot(engine, cutoff, category)
+        finally:
+            engine.db.rollback()
+        alerts, ev = view['alerts'], view['events']
+        total, normal, abnormal = view['counts']
         columns = st.columns(4)
-        for col, label, value in zip(columns, ['Total Events', 'Normal Events', 'Abnormal Events', 'Total Security Alerts'], [len(ev), normal, len(ev)-normal, len(alerts)]):
+        for col, label, value in zip(columns, ['Total Events', 'Normal Events', 'Abnormal Events', 'Total Security Alerts'], [total, normal, abnormal, view['total_alerts']]):
             col.metric(label, value)
         left, right = st.columns(2)
         with left:
             st.subheader('Attack Distribution')
             if alerts:
-                st.bar_chart(pd.DataFrame(alerts)['attack'].value_counts())
+                st.bar_chart(pd.DataFrame(view['distribution']).set_index('attack'))
             else:
                 st.caption('No alerts in this selection.')
         with right:
             st.subheader('Security Events Timeline')
-            if ev:
-                frame = pd.DataFrame(ev)
-                frame['time'] = pd.to_datetime(frame.ts, unit='s', utc=True).dt.floor('min')
-                st.line_chart(frame.groupby(['time', 'status']).size().unstack(fill_value=0))
+            if view['timeline']:
+                frame = pd.DataFrame(view['timeline'])
+                frame['time'] = pd.to_datetime(frame.ts, unit='s', utc=True)
+                st.line_chart(frame.pivot(index='time', columns='status', values='events').fillna(0))
         st.subheader('Recent Alerts • HIGH 🔴 / MEDIUM 🟠')
         if alerts:
             frame = pd.DataFrame(alerts)
+            frame['event_at_utc'] = pd.to_datetime(frame.event_ts, unit='s', utc=True).astype(str)
             frame['detected_at_utc'] = pd.to_datetime(frame.ts, unit='s', utc=True).astype(str)
-            st.dataframe(frame[['attack', 'detected_at_utc', 'ip', 'severity', 'rule', 'description', 'action']], width='stretch', hide_index=True)
+            st.dataframe(frame[['attack', 'event_at_utc', 'detected_at_utc', 'ip', 'source_port', 'dst_ip', 'dst_host', 'dst_port', 'status', 'severity', 'rule', 'description', 'action']], width='stretch', hide_index=True)
         else:
             st.caption('No alerts.')
         st.subheader('Event Details')
@@ -81,16 +118,8 @@ def dashboard():
         else:
             st.warning('No live sources configured. Configure readable auth logs, normalized HTTP/firewall logs, and test files.')
         if mode == 'Live monitoring':
-            configured = {s.get('format', 'jsonl') for s in settings['sources']}
-            coverage = [dict(category=name, required_source=requirement, configured='Configured (verify event coverage)' if ok else 'Not configured') for name, requirement, ok in [
-                (CATEGORIES[0], 'Auth log or normalized ssh_failed events', bool(configured)),
-                (CATEGORIES[1], 'JSONL connection telemetry with destination ports', 'jsonl' in configured),
-                (CATEGORIES[2], 'JSONL HTTP request telemetry', 'jsonl' in configured),
-                (CATEGORIES[3], 'JSONL HTTP request telemetry', 'jsonl' in configured),
-                (CATEGORIES[4], 'Configured test file paths', bool(settings['files'])),
-                (CATEGORIES[5], 'Auth log or normalized privilege events', bool(configured))]]
-            st.dataframe(pd.DataFrame(coverage), hide_index=True, width='stretch')
-        st.caption('Time filters use event time. Category filtering shows alert-linked events; suppressed repeat indicators remain available under All.')
+            st.dataframe(pd.DataFrame(coverage(settings, statuses)), hide_index=True, width='stretch')
+        st.caption('Time filters use event time. Details show up to 1,000 recent records; counts and charts include the full selection. Category filters include suppressed matching events.')
     finally:
         engine.close()
 

@@ -130,6 +130,7 @@ class MonitorTests(unittest.TestCase):
         with patch.dict(os.environ, {'SIX_DATA': self.tmp.name}):
             app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / 'app.py')).run(timeout=20)
             self.assertFalse(app.exception)
+            app.sidebar.radio[0].set_value('Demonstration').run()
             app.button[0].click().run()
             self.assertFalse(app.exception)
             self.assertEqual([m.value for m in app.metric], ['74', '68', '6', '6'])

@@ -1,0 +1,9 @@
+{
+  "journal": {"enabled": true, "lookback_seconds": 300},
+  "sources": [
+    {"path": "/path/to/existing/lab-access.log", "format": "http_access", "destination": "isolated-lab", "destination_port": 8080},
+    {"path": "/path/to/existing/lab-firewall.log", "format": "netfilter"},
+    {"path": "/path/to/existing/normalized.jsonl", "format": "jsonl", "kinds": ["ssh_failed", "connection", "http", "privilege"]}
+  ],
+  "files": [{"path": "/path/to/explicitly-selected/lab-file.txt"}]
+}
