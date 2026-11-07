@@ -1,3 +1,21 @@
+# SSH penalty correction — latest verification
+
+The installed OpenSSH is 10.5p1; its local sshd_config manual documents `PerSourcePenalties no`, and the installed daemon accepts the directive. Only the exact managed isolated-daemon configuration at `runtime/lab/sshd_config` was migrated (with a private backup). `sshd -t` passed before replacement and again afterward. The host SSH configuration, firewall, five-in-60 detection threshold, other five detectors, databases and working user services were not changed.
+
+The corrected runner counts only new, complete native `Failed password` records for the reserved test user from 127.0.0.1, and permits at most ten clients / 60 seconds. It stops at five actual records, requires their five normalized SQLite events (`kind=ssh_failed`, loopback source IP), and requires a newly generated HIGH/ABNORMAL SSH alert linked to those records and present in the dashboard read model. It does not count client connection attempts or penalty drops.
+
+**Actual corrected live result: UNVERIFIED.** The sandbox cannot access the isolated daemon's PID (`No such process` in its PID namespace), so no reload signal was sent. It also denies socket creation. The bounded retest made ten client attempts and observed **zero new native Failed password records**, so it correctly failed validation. The four previous lab failures remain present in both the native log and SQLite; there is **no new lab SSH alert**. The older real host SSH alert remains preserved. The independent collector heartbeat remained RUNNING.
+
+The other five saved category results remain PIPELINE VERIFIED, consistent with the user's recent full verification. SSH-only success/failure reporting preserves those entries. No other-category live tests were rerun for this correction.
+
+Automated regression results: **60 total, 58 passed, 2 skipped**. The skips remain real systemd-manager validation and opt-in live network verification. New tests cover the four-failures/penalty-drop/sixth-client case, stopping at five native records, ten drops/timeouts never passing, exclusion of old/partial/wrong-identity records, rotation/deduplication, native-log-to-SQLite correlation, a real collector/rule/read-model path using synthetic regression fixtures, strict threshold retention, safe config migration/parser failure, reload refusal for an unobservable PID, and preservation of the five already verified results. Fixtures are not represented as real SSH validation.
+
+On the ordinary Kali terminal, run `monitor.ssh_lab --apply` with the project Python interpreter, then `monitor.lab_test ssh`. The apply command pins and verifies only the same-user isolated sshd master before SIGHUP; it does not restart the lab's HTTP/TCP targets, collector, dashboard or host SSH. Claim success only after the runner reports at least five native failures, five collected events and a new matching alert. See TESTING_GUIDE.md.
+
+---
+
+## Historical delivery evidence (superseded by the latest correction/results above)
+
 # Final lab delivery evidence — 7 November 2026
 
 ## Overall status

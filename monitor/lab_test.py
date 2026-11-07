@@ -4,7 +4,6 @@ from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
-import shutil
 import socket
 import subprocess
 import sys
@@ -12,9 +11,10 @@ import time
 from urllib.parse import quote
 from urllib.request import urlopen
 from .core import CATEGORIES, Engine, config, now
-from .lab_setup import BASELINE, INVALID_USER, SCAN_PORTS, SSH_PORT, WEB_PORT, paths, atomic_json
+from .lab_setup import BASELINE, SCAN_PORTS, SSH_PORT, WEB_PORT, paths, atomic_json
 from .privilege_probe import probe
 from .views import collector_health, snapshot
+from .ssh_lab import failed_logins, collected_failures
 
 NAMES = dict(ssh=CATEGORIES[0],scan=CATEGORIES[1],sql=CATEGORIES[2],dos=CATEGORIES[3],file=CATEGORIES[4],privilege=CATEGORIES[5])
 
@@ -27,20 +27,7 @@ def web(path):
 def activity(name, root, settings):
     p=paths(root)
     if name=='ssh':
-        if not shutil.which('sshpass'):
-            raise RuntimeError('Installed Kali sshpass is required for the five bounded invalid-login attempts')
-        if settings['ssh_count']>5:
-            raise RuntimeError('Lab SSH safety limit is five attempts; configured SSH threshold exceeds it')
-        command=['sshpass','-p','deliberately-invalid-lab-password','ssh','-p',str(SSH_PORT),
-                 '-o','StrictHostKeyChecking=no','-o','UserKnownHostsFile=/dev/null',
-                 '-o','PreferredAuthentications=password','-o','PubkeyAuthentication=no',
-                 '-o','NumberOfPasswordPrompts=1','-o','ConnectTimeout=3',
-                 '-o','ConnectionAttempts=1',f'{INVALID_USER}@127.0.0.1','true']
-        for _ in range(settings['ssh_count']):
-            # The reserved username does not exist, and the daemon disallows all real accounts.
-            result=subprocess.run(command,capture_output=True,timeout=8)
-            if result.returncode==0:
-                raise RuntimeError('Unexpected successful SSH login; stop the lab')
+        return failed_logins(root,settings)
     elif name=='scan':
         if settings['port_count']>len(SCAN_PORTS):
             raise RuntimeError('Configured port threshold exceeds the 20 lab listeners')
@@ -133,7 +120,14 @@ def run_case(name,root,settings,data):
     finally:
         engine.close()
     try:
-        activity(name,root,settings)
+        evidence=activity(name,root,settings)
+        if name=='ssh':
+            event_ids=collected_failures(root,data,evidence)
+            result=wait_alert(name,data,previous,root)
+            if result['severity']!='HIGH' or result['event_id'] not in event_ids:
+                raise RuntimeError('SSH UNVERIFIED: new HIGH alert is not linked to the confirmed native failures')
+            result.update(attempts=evidence['attempts'],native_failed_password_records=evidence['native_failed_password_records'],collected_ssh_failed_events=len(event_ids),source_ip='127.0.0.1',confirmed_event_ids=event_ids)
+            return result
         return wait_alert(name,data,previous,root)
     finally:
         if name=='file':
@@ -179,6 +173,16 @@ def verify(root,settings,data):
     return report
 
 
+def save_ssh_validation(root,result):
+    """Update only SSH evidence; retain the five already verified categories."""
+    report_path=paths(root)['validation']
+    report=json.loads(report_path.read_text()) if report_path.exists() else {}
+    if not isinstance(report,dict) or not isinstance(report.get('tests',{}),dict):
+        raise ValueError('Existing validation report is malformed; preserving it')
+    report.setdefault('tests',{})[NAMES['ssh']]=result
+    atomic_json(report_path,report)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('test',choices=[*NAMES,'normal','verify'])
@@ -198,11 +202,18 @@ def main():
             result=dict(status='Normal activity performed; inspect dashboard')
         else:
             result=run_case(args.test,root,settings,data)
+            if args.test=='ssh':
+                save_ssh_validation(root,result)
         print(json.dumps(result,indent=2))
         if args.test=='verify' and any(t['status']=='UNVERIFIED' for t in result['tests'].values()):
             return 1
         return 0
     except (OSError,ValueError,RuntimeError,subprocess.SubprocessError) as exc:
+        if args.test=='ssh':
+            try:
+                save_ssh_validation(root,dict(status='UNVERIFIED',error=str(exc),checked_at=now()))
+            except (OSError,ValueError) as report_error:
+                print('Could not update SSH validation evidence: '+str(report_error),file=sys.stderr)
         print('UNVERIFIED: '+str(exc),file=sys.stderr)
         return 1
 

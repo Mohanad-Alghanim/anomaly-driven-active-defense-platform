@@ -4,7 +4,7 @@
 
 The lab targets, native telemetry producers, source configuration, watched file, isolated SSH host key, user-service file and graphical controls have been provisioned in `/home/kali/six-attack-security-monitor`. The existing live database, working host SSH detection and manually repaired dashboard/collector units are preserved.
 
-**Network validation is incomplete.** The development sandbox denies sockets and systemd user-bus access. Existing host SSH detection and an actual watched-file change were confirmed in the main live database/dashboard renderer. A real denied OS capability request was confirmed through an independent collector/database/dashboard renderer. New SSH, TCP and HTTP listeners must be activated and validated on the ordinary Kali desktop; their code/unit tests alone do not establish real detection.
+**Latest validation status:** the user's full real-lab verification passed the other five categories. SSH remained UNVERIFIED because per-source penalties dropped the fifth client before authentication. The correction below disables penalties only for the isolated daemon and verifies native failure records, collection and a new alert. This development sandbox still blocks sockets and cannot see the isolated daemon PID, so the corrected SSH live retest remains UNVERIFIED here. The five existing verified results are preserved.
 
 One-time action on the Kali desktop:
 
@@ -37,19 +37,30 @@ Normal controls and all-category verification are available after activation:
 
 **Prerequisites:** lab SSH component RUNNING; sshpass and ssh installed (confirmed here); collector running. The managed daemon binds only loopback, uses its own private host key, disables PAM/forwarding/root login and allows only the reserved **nonexistent** username `six-soc-invalid`. No real user account is created or used. The daemon cannot provide a useful login shell.
 
+Before the first SSH retest after this correction, apply/reload **only the isolated SSH daemon**:
+
 ```bash
+.venv/bin/python -m monitor.ssh_lab --apply
 .venv/bin/python -m monitor.lab_test ssh
 ```
 
-This performs exactly the configured number of failed password attempts, at most five. Its literal password is deliberately invalid, not a stored credential. Each client has a timeout; the server limits unauthenticated connections and sessions.
+`--apply` migrates only the exact previous managed `runtime/lab/sshd_config`, backs it up privately and checks it with `sshd -t` before replacement. The isolated daemon now has **`PerSourcePenalties no`**, supported by the installed OpenSSH 10.5p1. This exception applies only to the loopback test daemon at port 2222. Host `/etc/ssh` configuration, firewall settings, detector thresholds and other lab targets are not changed.
+
+Reload uses a pinned PID descriptor and checks the process owner, OpenSSH executable and exact private config path before sending SIGHUP. If the PID is missing, inaccessible or mismatched, no signal is sent. Run this command from the ordinary Kali terminal, where the daemon is visible, if the development sandbox reports `No such process`. A reload request is not itself validation success.
+
+The bounded test makes **up to ten client attempts in at most 60 seconds**, stopping immediately once at least **five new actual `Failed password` records** are observed. The detection threshold remains **five failures in 60 seconds**. Its literal password is deliberately invalid, not a stored credential. Each client has a timeout; the server limits unauthenticated connections and sessions.
+
+Only new native records for `six-soc-invalid` from `127.0.0.1` count. Earlier records, partial lines, client return codes, connection attempts, timeouts, `srclimit_penalise` messages and `drop connection ... penalty: failed authentication` messages do **not** count. Rotation is handled without recounting the same record. Four actual failures plus a dropped fifth connection is UNVERIFIED; if the sixth client produces the fifth real failure, the test stops there.
+
+Before reporting success, the runner confirms five corresponding SQLite events with `kind=ssh_failed` and `ip=127.0.0.1`, within the 60-second window. It then requires a new **SSH Brute Force / ABNORMAL / HIGH** alert linked to those native failures and present in the dashboard read model. The single SSH command updates only SSH's private validation result, preserving the other five results on success or failure.
 
 **Expected telemetry:** actual OpenSSH `Failed password` records in `runtime/lab/ssh-auth.log`; the auth adapter normalizes these automatically. **Default threshold:** five failures from `127.0.0.1` within 60 seconds. **Expected alert:** SSH Brute Force / ABNORMAL / HIGH, destination `127.0.0.1:2222`, rule and SSH access recommendations. Earlier contributing records remain NORMAL until the rule triggers.
 
 **Verify:** wrapper prints a new alert ID; select SSH Brute Force in Firefox and inspect event/detection timestamps, source, destination and recommendation. Do not count the older host-SSH alert as this target's validation.
 
-**Stop:** the command ends after five attempts; Ctrl+C stops it early. No continuous brute-force tool remains running.
+**Stop:** the command ends after five confirmed failures or at the ten-attempt/60-second limit; Ctrl+C stops it early. No continuous brute-force tool remains running.
 
-**Recover:** use SOC Lab Component Health. Review `runtime/lab/ssh-auth.log` if startup fails, then use **Restart SOC Lab and Monitoring**. A missing `/run/sshd` on another machine needs administrator-approved repair; do not change normal SSH settings to compensate. A reserved-name collision or modified managed SSH config fails closed and must be reviewed once.
+**Recover:** review `runtime/lab/ssh-auth.log` and run `monitor.ssh_lab --apply` to reload only the isolated daemon. Confirm `PerSourcePenalties no` in its private config; do not lower the five-in-60 threshold. If the reload fails, SSH remains UNVERIFIED. Use SOC Lab Component Health to inspect services. A missing `/run/sshd` on another machine needs administrator-approved repair; do not change normal SSH settings to compensate. A reserved-name collision or modified managed SSH config fails closed and must be reviewed once.
 
 ## 2. Port Scanning
 

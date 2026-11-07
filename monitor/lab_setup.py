@@ -78,9 +78,42 @@ PermitTTY no
 MaxAuthTries 1
 MaxSessions 1
 MaxStartups 3:50:5
+PerSourcePenalties no
 LoginGraceTime 5
 LogLevel VERBOSE
 '''
+
+
+def install_ssh_configuration(p):
+    """Migrate only the exact previous managed lab config; validate before replace."""
+    expected=ssh_configuration(p)
+    target=p['ssh_config']
+    if target.is_symlink():
+        raise RuntimeError('Refusing a symlinked lab SSH configuration')
+    previous=target.read_text() if target.exists() else None
+    if previous==expected:
+        return False
+    legacy=expected.replace('PerSourcePenalties no\n','')
+    if previous is not None and previous!=legacy:
+        raise RuntimeError('Lab SSH config differs from the managed configuration; preserving it for review')
+    descriptor,temporary=tempfile.mkstemp(prefix='.sshd_config.',dir=p['runtime'])
+    try:
+        with os.fdopen(descriptor,'w') as handle:
+            handle.write(expected)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if p['hostkey'].exists():
+            daemon=shutil.which('sshd') or '/usr/sbin/sshd'
+            result=subprocess.run([daemon,'-t','-f',temporary],capture_output=True,text=True,timeout=10)
+            if result.returncode:
+                raise RuntimeError('OpenSSH rejected the lab-only configuration: '+result.stderr.strip())
+        if previous is not None:
+            create_private(target.with_name(target.name+'.backup-'+str(time.time_ns())),previous.encode())
+        os.replace(temporary,target)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return True
 
 
 def provision(root, config_path=None, generate_key=True):
@@ -107,9 +140,7 @@ def provision(root, config_path=None, generate_key=True):
         if not keygen:
             raise RuntimeError('ssh-keygen is required; the installed OpenSSH client provides it')
         subprocess.run([keygen,'-q','-t','ed25519','-N','','-f',str(p['hostkey'])],check=True,timeout=15)
-    create_private(p['ssh_config'], ssh_configuration(p).encode())
-    if p['ssh_config'].read_text() != ssh_configuration(p):
-        raise RuntimeError('Existing lab SSH config differs from managed loopback-only config; preserve and review it before replacing')
+    install_ssh_configuration(p)
     supplied = json.loads(config_path.read_text()) if config_path.exists() else {}
     if not isinstance(supplied, dict):
         raise ValueError('Configuration must be an object')
