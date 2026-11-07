@@ -230,3 +230,7 @@ config.local.json
 logs/
 .local-validation/
 *.lock
+
+# Private lab state, keys, logs and configuration backups
+runtime/
+config.local.json.backup-*

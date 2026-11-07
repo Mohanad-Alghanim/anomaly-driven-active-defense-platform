@@ -1,0 +1,21 @@
+[Unit]
+Description=Six-Attack SOC loopback-only isolated lab targets
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=@WORKDIR@
+ExecStart="@PYTHON@" -m monitor.lab --root "@ROOT@"
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=yes
+CPUQuota=40%
+MemoryMax=256M
+LimitNOFILE=256
+
+[Install]
+WantedBy=default.target

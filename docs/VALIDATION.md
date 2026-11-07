@@ -1,47 +1,58 @@
-# Autonomous upgrade validation — 7 November 2026
+# Final lab delivery evidence — 7 November 2026
 
-## Automated results
+## Overall status
 
-Environment: Kali Linux workspace, Python 3.14, Streamlit 1.66.1, existing project-local `.venv`. No new Python dependencies were needed for this upgrade.
+**Acceptance is incomplete: new network targets and all-category production validation are UNVERIFIED.** All target code and native telemetry sources are provisioned, but the execution sandbox denies socket creation and systemd user-bus access. This report distinguishes real observed activity from unit fixtures and prepared components.
 
-- `.venv/bin/python -m unittest discover -s tests -v`: **36 tests passed**.
-- `.venv/bin/python -m pip check`: **No broken requirements found**.
-- `bash -n start.sh`: passed.
-- `desktop-file-validate` on the four generated user launchers: passed.
+The existing main live database and working SSH alert were preserved. Installed collector/dashboard unit files already contain the manually repaired unquoted WorkingDirectory; the lab upgrade does not overwrite them.
+
+## Six-category results
+
+| Category | Actual evidence obtained | Remaining validation |
+| --- | --- | --- |
+| SSH Brute Force | Existing main live `journal:sshd` event/alert confirmed: ABNORMAL / HIGH, consistent with the user's successful real SSH test | New isolated loopback SSH target on 2222: UNVERIFIED; Firefox recheck after activation |
+| Port Scanning | Native socket-accept target and automatic source configuration implemented | Actual TCP target → collector → alert: UNVERIFIED (socket restriction) |
+| SQL Injection | Actual disposable SQLite query executes; normal query returns one row, bounded injected query returns both rows; stacked statement rejected | HTTP transport/access log → live alert: UNVERIFIED (socket restriction) |
+| Denial of Service (DoS) | Instrumented HTTP target and bounded request runner implemented; deterministic rate rule tested | Actual HTTP requests → collector → alert: UNVERIFIED (socket restriction) |
+| Unauthorized File Modification | Actual designated lab file was modified; existing independently running collector produced a new HIGH/ABNORMAL alert in **main live SQLite**; the actual dashboard rendered it through AppTest | Interactive Firefox display remains UNVERIFIED; approved baseline was restored |
+| Suspicious Privilege Escalation | Actual Linux CAP_SETUID request denied with EPERM, native audit log read by a real independent collector process, alert persisted in isolated validation SQLite, actual dashboard rendered it through AppTest | Production collector restart/new-rule path and interactive Firefox: UNVERIFIED |
+
+A separate real native validation also covered file integrity and denied capability events together through a standalone background collector process. Benign `getuid` activity generated no alert; restoring the approved file hash generated no extra alert. The validation collector stopped gracefully. This was actual syscall/filesystem activity, not appended synthetic security fixtures. Its private evidence/data are in ignored `.local-validation/`; only summary results are documented publicly.
+
+No claim is made that the native privilege probe validates arbitrary privilege escalation, host auditd, PAM bypass, or a successful exploit. It validates an actual denied capability boundary and deterministic processing of that native audit event. No privilege was granted.
+
+## Automated checks
+
+- `.venv/bin/python -m unittest discover -s tests -v`: **45 total, 43 passed, 2 skipped**.
+- All six rule categories, normal handling, thresholds/windows, cursor recovery, incremental ingestion, rotation, duplicate suppression, migration/persistence, concurrent SQLite access, process restarts, capacity reporting and dashboard rendering remain covered.
+- Added provisioning idempotence/config preservation, real disposable SQL behavior, real denied capability and filesystem pipeline, live readiness evidence separation, graphical activation cancellation, repaired-unit preservation and unquoted WorkingDirectory regression coverage for all three service files.
+- Generated unit text is structurally validated before write. Real `systemd-analyze --user verify` is explicitly skipped when manager/socket restrictions prevent it; structural checks are not represented as an actual systemd launch.
+- The all-category live network integration test is explicitly opt-in (`SIX_LAB_NETWORK_TESTS=1`) and requires the already approved running lab. It was skipped here and does not count as a pass.
+- Provisioned OpenSSH configuration: `/usr/sbin/sshd -t -f runtime/lab/sshd_config` **passed**, using the private newly generated key. This is a configuration check, not listener/authentication validation.
+- `desktop-file-validate` on all four new lab graphical controls **passed**.
+- `.venv/bin/python -m pip check`: no broken requirements.
 - `git diff --check`: passed.
 
-The tests cover:
+## Deployment and preservation
 
-- All six existing detection rules, inclusive SSH boundary, request threshold configuration, normal handling, distinct-port counting and source-IP isolation.
-- Normal sudo/su sessions, Journal parsing, bounded oldest-first Journal batches, durable cursor reuse, expired-cursor fallback with replay deduplication, and permission-error reporting. The integration Journal reader is injected synthetic output, not a modified system Journal.
-- Real incremental file ingestion, partial lines, log rotation, invalid/oversized records, missing sources and non-regular files without blocking.
-- File content changes and authorized hashes in temporary test files.
-- A full mixed-source synthetic path: Journal authentication records, raw common/combined HTTP logs, raw firewall records, a temporary file modification, the background collection cycle, all six rules, SQLite persistence and the dashboard read model. Exactly one alert per category was produced; a restarted engine replayed without duplicate events or alerts.
-- A real standalone worker process (no Streamlit browser), graceful termination, restart, newly appended event collection, persisted progress and private database permissions.
-- Existing database schema migration without losing old records, concurrent writer/read-only dashboard access, single-collector locking, byte/event capacity reporting and stale heartbeat detection.
-- Streamlit AppTest startup, six-category demo, repeated demo replacement, category filtering, live worker-health rendering and source/destination fields. The live view is tested to avoid invoking collection.
-- Preparation of user services and launchers without activating anything; graphical activation cancellation prevents service activation.
+Confirmed via read-only main-database inspection: collector heartbeat was current, sources were automatically picked up after the one-time merge, and the previous real SSH alert remained present. The main live file alert was generated by that existing collector, without restarting it or replacing its user unit. No demonstration database was used for these real validations.
 
-Default demonstration remains **74 events, 68 NORMAL, 6 ABNORMAL, 6 alerts**. All samples and integration fixtures are synthetic. Tests used temporary SQLite databases and temporary lab files. No real cyberattack was executed.
+Prepared locally:
 
-## Confirmed environment probes
+- Managed loopback SSH config and own Ed25519 key; no real user/account or password provisioned.
+- Empty native target log files and an explicitly watched test file with approved baseline hash.
+- One-time merged source definitions, with a private original-config backup.
+- `six-soc-lab.service`, using unquoted WorkingDirectory, normal-user execution, NoNewPrivileges, restart backoff and resource limits.
+- Graphical Start, Stop, Restart and Component Health controls, alongside the existing dashboard launcher.
 
-- Read-only `journalctl` worked without sudo.
-- An existing sudo Journal record was retrieved and parsed as a privilege event. Its raw content was not saved in repository artifacts or printed in tool output. This establishes access/format compatibility for that record, not real attack detection accuracy.
-- A standalone one-cycle collector using the actual authentication Journal query reported RUNNING with a readable source and no recent matching records. It used an ignored validation data directory, not production data.
-- The project's existing local log configuration content was preserved.
-- The user service templates and four graphical launchers were installed in Kali's user configuration/applications/Desktop locations. Preparation did not enable or start the services. The installer protected only this application's data and configuration.
+The lab service was **not enabled or started** here. Existing working dashboard/collector units were not overwritten. Host SSH, firewall rules, packet capture, system packages, group membership and system security settings were not changed. No privileged host setup is required in the inspected environment; the missing step is user-approved activation on the ordinary desktop.
 
-## Deployment restrictions and outstanding checks
+## Outstanding desktop acceptance
 
-The development sandbox rejects access to the systemd user bus (`Operation not permitted`). Both `systemctl --user` inspection and systemd's user-service verification encountered this restriction. Service activation, service-manager restart policy, actual after-login startup and logout/login behavior are **not confirmed** here.
+1. Open Start SOC Lab and Monitoring and approve the loopback-listener/startup confirmation.
+2. Confirm the lab service, new SSH/HTTP/TCP targets, collector and dashboard are running.
+3. Execute `.venv/bin/python -m monitor.lab_test verify` from the project directory. It performs bounded local activity only and requires a new alert from the correct source for each category.
+4. Review all six alerts in Firefox, close/reopen Firefox to confirm independent collection, and test logout/login startup and graphical stop/restart.
+5. Keep any unsuccessful category UNVERIFIED. Unit tests, historical host SSH alerts, an empty readable source or demo results must not substitute for these checks.
 
-The updated dashboard launcher was invoked and reached Streamlit server startup, but socket creation failed with `PermissionError: [Errno 1] Operation not permitted`. A listening HTTP endpoint, actual Firefox visuals, graphical dialogs, and timed browser refresh are **not confirmed** in this environment. Streamlit's in-process AppTest executed successfully without sockets.
-
-Because user services could not be activated here, deployment is **prepared, not confirmed active**. On the ordinary Kali desktop, open **Activate SOC Monitoring** once and approve its local-service confirmation. Then open **Six-Attack SOC**, check collector/source health, close Firefox briefly, and reopen it to confirm collection continued. Log out/in to verify automatic startup. Use **SOC Monitoring Status** or the documented user-service commands if activation fails.
-
-## Real telemetry remains operator setup
-
-No SSH service was enabled, firewall rule changed, packet capture activated, system security setting changed, extra web target introduced or remote endpoint exposed. Actual HTTP/firewall/lab-file inputs must be selected in `config.local.json` and provided by the isolated target's existing approved logging mechanisms. The environment's installed-but-inactive SSH service was left untouched.
-
-Real SSH brute force, port scanning, SQL injection, DoS, unauthorized lab-file activity and privilege-escalation tests have not been performed. Synthetic end-to-end validation is not real-world attack validation. Initial dependency installation on a fresh Kali machine also remains unverified; the project-local Python environment was already installed during the original implementation.
+These steps could not be executed through the blocked user bus/network namespace in this development environment. The project is therefore delivered with implemented/provisioned components and explicit unresolved acceptance items, not falsely labelled fully operational.

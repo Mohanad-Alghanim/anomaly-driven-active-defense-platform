@@ -18,7 +18,7 @@ def cycle(engine, journal_reader=None):
         statuses.append(collect_journal(engine, journal_reader) if journal_reader else collect_journal(engine))
         statuses.extend(collect_files(engine))
         status = 'RUNNING' if all(s['available'] and not s.get('rejected') for s in statuses if s.get('enabled', True)) else 'DEGRADED'
-        health = dict(status=status, heartbeat=now(), pid=os.getpid(), sources=statuses, last_event=json.loads(engine.state('last_event') or 'null'))
+        health = dict(status=status, rules_version=3, heartbeat=now(), pid=os.getpid(), sources=statuses, last_event=json.loads(engine.state('last_event') or 'null'))
     except StorageFull as exc:
         health = dict(status='CAPACITY REACHED', heartbeat=now(), pid=os.getpid(), sources=statuses, error=str(exc), last_event=json.loads(engine.state('last_event') or 'null'))
     engine.set_state('collector_health', json.dumps(health))

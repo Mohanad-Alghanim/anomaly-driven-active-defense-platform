@@ -8,6 +8,7 @@ import streamlit as st
 from monitor.core import Engine, CATEGORIES, config, now
 from monitor.demo import events
 from monitor.views import collector_health, coverage, snapshot
+from monitor.lab_readiness import readiness
 
 st.set_page_config(page_title='Six-Attack SOC', page_icon='🛡️', layout='wide')
 st.markdown('''<style>
@@ -67,6 +68,9 @@ def dashboard():
                 st.warning('Background collector: ' + status)
             if health.get('error'):
                 st.error(health['error'])
+            st.subheader('Six-Category Lab Readiness')
+            st.caption('Target/source health is separate from live validation. Unit tests and demonstration data never mark a lab category verified.')
+            st.dataframe(pd.DataFrame(readiness(settings, health)), hide_index=True, width='stretch')
             last = health.get('last_event')
             if last is None:
                 import json

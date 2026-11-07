@@ -1,6 +1,8 @@
 """Per-user deployment; preparation never starts or enables a network listener."""
 import argparse
 import json
+import configparser
+import shlex
 import os
 from pathlib import Path
 import shutil
@@ -8,6 +10,7 @@ import subprocess
 import sys
 import time
 
+LAB_UNIT = 'six-soc-lab.service'
 UNITS = ('six-soc-collector.service', 'six-soc-dashboard.service')
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -20,6 +23,44 @@ def quote(value, systemd=False):
     if not systemd:
         value = value.replace('`', '\\`').replace('$', '\\$')
     return value
+
+
+def working_directory(value):
+    # WorkingDirectory is a single path directive, not an ExecStart argument.
+    # Quotes become literal path characters on the affected Kali systemd version.
+    value = str(value)
+    if any(ord(char)<32 for char in value):
+        raise ValueError('Invalid working directory')
+    return value.replace('\\', r'\x5c').replace('"', r'\x22').replace('%','%%')
+
+
+def render_unit(root, name, config_path=None, data=None):
+    root = Path(root).resolve()
+    values = dict(ROOT=root, PYTHON=root/'.venv/bin/python', CONFIG=config_path or root/'config.local.json', DATA=data or root/'data')
+    text = (root/'deploy'/f'{name}.in').read_text()
+    text = text.replace('@WORKDIR@', working_directory(root))
+    for key,value in values.items():
+        text = text.replace('@'+key+'@',quote(value,systemd=True))
+    validate_unit(text)
+    return text
+
+
+def validate_unit(text):
+    parser=configparser.ConfigParser(interpolation=None,strict=False)
+    parser.read_string(text)
+    if not all(section in parser for section in ('Unit','Service','Install')):
+        raise ValueError('Unit sections missing')
+    directory=parser['Service'].get('WorkingDirectory','')
+    if not directory.startswith('/') or directory.startswith(('"',"'")) or directory.endswith(('"',"'")):
+        raise ValueError('WorkingDirectory must be an absolute unquoted path')
+    if '@WORKDIR@' in text or '@ROOT@' in text:
+        raise ValueError('Unexpanded unit template')
+    command=shlex.split(parser['Service'].get('ExecStart',''))
+    if not command or not command[0].startswith('/'):
+        raise ValueError('ExecStart requires an absolute executable')
+    if parser['Service'].get('Restart')!='on-failure' or parser['Install'].get('WantedBy')!='default.target':
+        raise ValueError('Required lifecycle settings missing')
+    return True
 
 
 def write_managed(path, text, executable=False):
@@ -55,12 +96,8 @@ def prepare(root=ROOT, home=None):
         if path.is_file() and not path.is_symlink() and (path.name.startswith(('live.db', 'demo.db')) or path.name == 'collector.lock'):
             path.chmod(0o600)
     units = home/'.config/systemd/user'
-    values = dict(ROOT=root, PYTHON=python, CONFIG=config, DATA=data)
     for name in UNITS:
-        text = (root/'deploy'/f'{name}.in').read_text()
-        for key, value in values.items():
-            text = text.replace('@'+key+'@', quote(value, systemd=True))
-        write_managed(units/name, text)
+        write_managed(units/name, render_unit(root,name,config,data))
     entries = {
         'six-soc.desktop': ('Six-Attack SOC', 'firefox --new-tab http://127.0.0.1:8501', 'security-high'),
         'six-soc-activate.desktop': ('Activate SOC Monitoring', f'"{quote(python)}" -m monitor.install --activate-gui', 'system-run'),
@@ -110,9 +147,58 @@ def dialog(text, question=False):
         raise RuntimeError('Cannot open graphical dialog in this session: '+str(exc)) from exc
 
 
+def prepare_lab(root=ROOT,home=None):
+    from .lab_setup import provision
+    root=Path(root).resolve()
+    home=Path(home) if home else Path.home()
+    provision(root)
+    # Preserve the repaired, running dashboard/collector units. Add only the new lab unit.
+    units=home/'.config/systemd/user'
+    write_managed(units/LAB_UNIT,render_unit(root,LAB_UNIT))
+    entries={
+        'six-soc-lab-start.desktop':('Start SOC Lab and Monitoring','--lab-start-gui','system-run'),
+        'six-soc-lab-stop.desktop':('Stop SOC Lab and Monitoring','--lab-stop-gui','process-stop'),
+        'six-soc-lab-restart.desktop':('Restart SOC Lab and Monitoring','--lab-restart-gui','view-refresh'),
+        'six-soc-lab-status.desktop':('SOC Lab Component Health','--lab-status-gui','utilities-system-monitor'),
+    }
+    for name,(title,flag,icon) in entries.items():
+        command=f'"{quote(root/".venv/bin/python")}" -m monitor.install {flag}'
+        text=f'[Desktop Entry]\nType=Application\nName={title}\nExec={command}\nPath={root}\nIcon={icon}\nTerminal=false\nCategories=System;Monitor;\n'
+        write_managed(home/'.local/share/applications'/name,text,executable=True)
+        if (home/'Desktop').is_dir():
+            write_managed(home/'Desktop'/name,text,executable=True)
+    return units/LAB_UNIT
+
+
+def lab_control(args):
+    from .lab_readiness import read_target_health
+    all_units=(LAB_UNIT,*UNITS)
+    if args.lab_status_gui:
+        result=subprocess.run(['systemctl','--user','is-active',*all_units],capture_output=True,text=True,timeout=10)
+        health=read_target_health(ROOT/'runtime/lab')
+        dialog('Lab / collector / dashboard:\n'+result.stdout.strip()+'\n'+result.stderr.strip()+'\n\nTarget health: '+health.get('status','STOPPED')+'\nDashboard: http://127.0.0.1:8501')
+    elif args.lab_stop_gui:
+        if dialog("Stop this project's lab targets, collector and dashboard? History is preserved; enabled services resume at next login.",question=True):
+            systemctl('stop',UNITS[1],UNITS[0],LAB_UNIT)
+            dialog('SOC lab and monitoring stopped.')
+    elif args.lab_start_gui or args.lab_restart_gui:
+        if dialog('Start/restart the SOC lab and monitoring and enable login startup?\n\nLoopback only: web 8088, isolated SSH 2222, TCP targets 9100–9119, dashboard 8501. No host firewall, SSH or system permissions are changed. No attack tests run automatically.',question=True):
+            prepare_lab()
+            systemctl('daemon-reload')
+            systemctl('reset-failed',*all_units)
+            systemctl('enable',*all_units)
+            systemctl('restart',*all_units)
+            dialog('SOC lab and monitoring requested. Open SOC Lab Component Health, then Six-Attack SOC.')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--prepare-lab', action='store_true', help='Provision lab sources, isolated targets and graphical controls without starting services')
+    group.add_argument('--lab-start-gui', action='store_true')
+    group.add_argument('--lab-stop-gui', action='store_true')
+    group.add_argument('--lab-restart-gui', action='store_true')
+    group.add_argument('--lab-status-gui', action='store_true')
     group.add_argument('--prepare', action='store_true', help='Install user units/launchers without enabling or starting services')
     group.add_argument('--activate', action='store_true', help='Explicitly enable and start both user services (localhost dashboard)')
     group.add_argument('--activate-gui', action='store_true')
@@ -120,7 +206,11 @@ def main():
     group.add_argument('--restart-gui', action='store_true')
     args = parser.parse_args()
     try:
-        if args.prepare:
+        if args.prepare_lab:
+            print('Lab prepared; no services enabled:',prepare_lab())
+        elif any((args.lab_start_gui,args.lab_stop_gui,args.lab_restart_gui,args.lab_status_gui)):
+            lab_control(args)
+        elif args.prepare:
             print('Prepared user services and graphical launchers in', prepare())
         elif args.status_gui:
             status = subprocess.run(['systemctl', '--user', 'is-active', *UNITS], capture_output=True, text=True, timeout=10)
@@ -135,7 +225,7 @@ def main():
         else:
             print(activate())
     except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
-        if args.activate_gui or args.status_gui or args.restart_gui:
+        if args.activate_gui or args.status_gui or args.restart_gui or any((args.lab_start_gui,args.lab_stop_gui,args.lab_restart_gui,args.lab_status_gui)):
             try:
                 dialog('Setup/status failed:\n'+str(exc))
             except RuntimeError:
