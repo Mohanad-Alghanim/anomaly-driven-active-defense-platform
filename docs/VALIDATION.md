@@ -24,7 +24,7 @@ On the ordinary Kali terminal, run `monitor.ssh_lab --apply` with the project Py
 
 The existing main live database and working SSH alert were preserved. Installed collector/dashboard unit files already contain the manually repaired unquoted WorkingDirectory; the lab upgrade does not overwrite them.
 
-## Six-category results
+## Detection results
 
 | Category | Actual evidence obtained | Remaining validation |
 | --- | --- | --- |
@@ -60,14 +60,14 @@ Prepared locally:
 - Managed loopback SSH config and own Ed25519 key; no real user/account or password provisioned.
 - Empty native target log files and an explicitly watched test file with approved baseline hash.
 - One-time merged source definitions, with a private original-config backup.
-- `six-soc-lab.service`, using unquoted WorkingDirectory, normal-user execution, NoNewPrivileges, restart backoff and resource limits.
+- `active-defense-lab.service`, using unquoted WorkingDirectory, normal-user execution, NoNewPrivileges, restart backoff and resource limits.
 - Graphical Start, Stop, Restart and Component Health controls, alongside the existing dashboard launcher.
 
 The lab service was **not enabled or started** here. Existing working dashboard/collector units were not overwritten. Host SSH, firewall rules, packet capture, system packages, group membership and system security settings were not changed. No privileged host setup is required in the inspected environment; the missing step is user-approved activation on the ordinary desktop.
 
 ## Outstanding desktop acceptance
 
-1. Open Start SOC Lab and Monitoring and approve the loopback-listener/startup confirmation.
+1. Open Active Defense Platform — Start Monitoring and approve the loopback-listener/startup confirmation.
 2. Confirm the lab service, new SSH/HTTP/TCP targets, collector and dashboard are running.
 3. Execute `.venv/bin/python -m monitor.lab_test verify` from the project directory. It performs bounded local activity only and requires a new alert from the correct source for each category.
 4. Review all six alerts in Firefox, close/reopen Firefox to confirm independent collection, and test logout/login startup and graphical stop/restart.

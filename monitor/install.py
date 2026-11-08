@@ -10,8 +10,8 @@ import subprocess
 import sys
 import time
 
-LAB_UNIT = 'six-soc-lab.service'
-UNITS = ('six-soc-collector.service', 'six-soc-dashboard.service')
+LAB_UNIT = 'active-defense-lab.service'
+UNITS = ('active-defense-collector.service', 'active-defense-dashboard.service')
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -99,13 +99,10 @@ def prepare(root=ROOT, home=None):
     for name in UNITS:
         write_managed(units/name, render_unit(root,name,config,data))
     entries = {
-        'six-soc.desktop': ('Six-Attack SOC', 'firefox --new-tab http://127.0.0.1:8501', 'security-high'),
-        'six-soc-activate.desktop': ('Activate SOC Monitoring', f'"{quote(python)}" -m monitor.install --activate-gui', 'system-run'),
-        'six-soc-restart.desktop': ('Restart SOC Monitoring', f'"{quote(python)}" -m monitor.install --restart-gui', 'view-refresh'),
-        'six-soc-status.desktop': ('SOC Monitoring Status', f'"{quote(python)}" -m monitor.install --status-gui', 'utilities-system-monitor'),
+        'active-defense.desktop': ('Development of an Anomaly-Driven Active Defense Platform Against Unauthorized Access and Credential Attacks', 'firefox --new-tab http://127.0.0.1:8501', 'security-high'),
     }
     for name, (title, command, icon) in entries.items():
-        text = f'[Desktop Entry]\nType=Application\nName={title}\nComment=Local six-category SOC monitoring\nExec={command}\nPath={root}\nIcon={icon}\nTerminal=false\nCategories=System;Monitor;\n'
+        text = f'[Desktop Entry]\nType=Application\nName={title}\nComment=Local active defense monitoring\nExec={command}\nPath={root}\nIcon={icon}\nTerminal=false\nCategories=System;Monitor;\n'
         write_managed(home/'.local/share/applications'/name, text, executable=True)
         if (home/'Desktop').is_dir():
             write_managed(home/'Desktop'/name, text, executable=True)
@@ -129,7 +126,7 @@ def activate():
 def dialog(text, question=False):
     # Ask explicitly before enabling/restarting the localhost listener.
     if shutil.which('zenity'):
-        result = subprocess.run(['zenity', '--question' if question else '--info', '--title=Six-Attack SOC', '--width=520', '--text='+text], check=False)
+        result = subprocess.run(['zenity', '--question' if question else '--info', '--title=Anomaly-Driven Active Defense Platform', '--width=520', '--text='+text], check=False)
         return result.returncode == 0
     try:
         import tkinter as tk
@@ -137,7 +134,7 @@ def dialog(text, question=False):
         window = tk.Tk()
         window.withdraw()
         try:
-            return messagebox.askyesno('Six-Attack SOC', text, parent=window) if question else messagebox.showinfo('Six-Attack SOC', text, parent=window) == 'ok'
+            return messagebox.askyesno('Anomaly-Driven Active Defense Platform', text, parent=window) if question else messagebox.showinfo('Anomaly-Driven Active Defense Platform', text, parent=window) == 'ok'
         finally:
             window.destroy()
     except (ImportError, RuntimeError) as exc:
@@ -156,10 +153,10 @@ def prepare_lab(root=ROOT,home=None):
     units=home/'.config/systemd/user'
     write_managed(units/LAB_UNIT,render_unit(root,LAB_UNIT))
     entries={
-        'six-soc-lab-start.desktop':('Start SOC Lab and Monitoring','--lab-start-gui','system-run'),
-        'six-soc-lab-stop.desktop':('Stop SOC Lab and Monitoring','--lab-stop-gui','process-stop'),
-        'six-soc-lab-restart.desktop':('Restart SOC Lab and Monitoring','--lab-restart-gui','view-refresh'),
-        'six-soc-lab-status.desktop':('SOC Lab Component Health','--lab-status-gui','utilities-system-monitor'),
+        'active-defense-lab-start.desktop':('Active Defense Platform — Start Monitoring','--lab-start-gui','system-run'),
+        'active-defense-lab-stop.desktop':('Active Defense Platform — Stop Monitoring','--lab-stop-gui','process-stop'),
+        'active-defense-lab-restart.desktop':('Active Defense Platform — Restart Monitoring','--lab-restart-gui','view-refresh'),
+        'active-defense-lab-status.desktop':('Active Defense Platform — Component Health','--lab-status-gui','utilities-system-monitor'),
     }
     for name,(title,flag,icon) in entries.items():
         command=f'"{quote(root/".venv/bin/python")}" -m monitor.install {flag}'
@@ -180,15 +177,15 @@ def lab_control(args):
     elif args.lab_stop_gui:
         if dialog("Stop this project's lab targets, collector and dashboard? History is preserved; enabled services resume at next login.",question=True):
             systemctl('stop',UNITS[1],UNITS[0],LAB_UNIT)
-            dialog('SOC lab and monitoring stopped.')
+            dialog('Active Defense Platform monitoring stopped.')
     elif args.lab_start_gui or args.lab_restart_gui:
-        if dialog('Start/restart the SOC lab and monitoring and enable login startup?\n\nLoopback only: web 8088, isolated SSH 2222, TCP targets 9100–9119, dashboard 8501. No host firewall, SSH or system permissions are changed. No attack tests run automatically.',question=True):
+        if dialog('Start/restart the Active Defense Platform monitoring and enable login startup?\n\nLoopback only: web 8088, isolated SSH 2222, TCP targets 9100–9119, dashboard 8501. No host firewall, SSH or system permissions are changed. No attack tests run automatically.',question=True):
             prepare_lab()
             systemctl('daemon-reload')
             systemctl('reset-failed',*all_units)
             systemctl('enable',*all_units)
             systemctl('restart',*all_units)
-            dialog('SOC lab and monitoring requested. Open SOC Lab Component Health, then Six-Attack SOC.')
+            dialog('Active Defense Platform monitoring requested. Open Active Defense Platform — Component Health, then Anomaly-Driven Active Defense Platform.')
 
 
 def main():
@@ -218,10 +215,10 @@ def main():
         elif args.restart_gui:
             if dialog('Restart the background collector and localhost dashboard at 127.0.0.1:8501? Saved events and collection progress are preserved.', question=True):
                 systemctl('restart', *UNITS)
-                dialog('Services restarted. Open Six-Attack SOC to check source health.')
+                dialog('Services restarted. Open Anomaly-Driven Active Defense Platform to check source health.')
         elif args.activate_gui:
             if dialog('Enable automatic monitoring after login and start the background collector and dashboard?\n\nThe dashboard listens only at 127.0.0.1:8501. Authentication Journal access is read-only. SSH, firewall rules and packet capture are unchanged.', question=True):
-                dialog('Services activated:\n'+activate()+'\n\nOpen Six-Attack SOC from the applications menu.')
+                dialog('Services activated:\n'+activate()+'\n\nOpen Anomaly-Driven Active Defense Platform from the applications menu.')
         else:
             print(activate())
     except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:

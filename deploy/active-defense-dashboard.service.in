@@ -1,7 +1,7 @@
 [Unit]
-Description=Six-Attack SOC localhost dashboard
-Wants=six-soc-collector.service
-After=six-soc-collector.service
+Description=Anomaly-Driven Active Defense Platform localhost dashboard
+Wants=active-defense-collector.service
+After=active-defense-collector.service
 StartLimitIntervalSec=60
 StartLimitBurst=5
 

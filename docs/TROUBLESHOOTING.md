@@ -2,9 +2,9 @@
 
 ## Start or restart without a terminal
 
-Use **Start SOC Lab and Monitoring** or **Restart SOC Lab and Monitoring**. Each asks before enabling/restarting the localhost services. No attack tests are scheduled. Use **SOC Lab Component Health** for current service/target state, and **Six-Attack SOC** for telemetry/validation status.
+Use **Active Defense Platform — Start Monitoring** or **Active Defense Platform — Restart Monitoring**. Each asks before enabling/restarting the localhost services. No attack tests are scheduled. Use **Active Defense Platform — Component Health** for current service/target state, and **Anomaly-Driven Active Defense Platform** for telemetry/validation status.
 
-If startup fails, existing history is preserved. Use **Stop SOC Lab and Monitoring** to stop only project processes. The host SSH service is independent and remains unchanged. Enabled user units restart at next login; disable them explicitly if that is not wanted.
+If startup fails, existing history is preserved. Use **Active Defense Platform — Stop Monitoring** to stop only project processes. The host SSH service is independent and remains unchanged. Enabled user units restart at next login; disable them explicitly if that is not wanted.
 
 ## WorkingDirectory quotation regression
 
@@ -15,7 +15,7 @@ The existing manually repaired units were preserved by `--prepare-lab`. A future
 Optional inspection:
 
 ```bash
-systemctl --user cat six-soc-collector.service six-soc-dashboard.service six-soc-lab.service
+systemctl --user cat active-defense-collector.service active-defense-dashboard.service active-defense-lab.service
 ```
 
 ## Sandbox or missing desktop session
@@ -29,8 +29,8 @@ Tkinter or Zenity needs the desktop display. The launchers run with the project 
 The fixed lab endpoints are loopback 8088, 2222 and 9100–9119; dashboard 8501. Startup fails rather than killing an unrelated process or moving to undocumented ports. Inspect Component Health and the lab service log. Resolve any unrelated conflicting application deliberately, then use Restart. The lab refuses an altered managed SSH configuration to avoid accidental remote exposure.
 
 ```bash
-systemctl --user status six-soc-lab.service six-soc-collector.service six-soc-dashboard.service
-journalctl --user -u six-soc-lab.service -n 50 --no-pager
+systemctl --user status active-defense-lab.service active-defense-collector.service active-defense-dashboard.service
+journalctl --user -u active-defense-lab.service -n 50 --no-pager
 ```
 
 If repeated failures hit systemd's start limit, the graphical Start/Restart control resets the failed state before restarting. It preserves SQLite and cursors.
