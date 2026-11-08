@@ -218,12 +218,12 @@ class AutonomousTests(unittest.TestCase):
         shutil.copy2(ROOT/'config.example.json',project/'config.example.json')
         with patch('monitor.install.subprocess.run', side_effect=AssertionError('must not start services')):
             units=prepare(project,home)
-        dashboard=(units/'six-soc-dashboard.service').read_text()
-        collector=(units/'six-soc-collector.service').read_text()
+        dashboard=(units/'active-defense-dashboard.service').read_text()
+        collector=(units/'active-defense-collector.service').read_text()
         self.assertIn('--server.address 127.0.0.1 --server.port 8501',dashboard)
         self.assertIn('WantedBy=default.target',collector)
         self.assertIn('Restart=on-failure',collector)
-        self.assertTrue((home/'Desktop/six-soc.desktop').exists())
+        self.assertTrue((home/'Desktop/active-defense.desktop').exists())
 
     def test_worker_process_restart_without_browser(self):
         data=self.root/'worker-data'; path=self.root/'source.jsonl'; cfg=self.root/'config.json'

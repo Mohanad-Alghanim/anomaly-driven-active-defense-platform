@@ -10,13 +10,13 @@ from monitor.demo import events
 from monitor.views import collector_health, coverage, snapshot
 from monitor.lab_readiness import readiness
 
-st.set_page_config(page_title='Six-Attack SOC', page_icon='🛡️', layout='wide')
+st.set_page_config(page_title='Anomaly-Driven Active Defense Platform', layout='wide')
 st.markdown('''<style>
 .stApp {background: #0b1220; color: #e5edf8}
 [data-testid=stMetric] {background: #142239; padding: 18px; border-radius: 10px}
-h1 {color: #68d9ef}
+h1 {color: #68d9ef; font-size: clamp(1.5rem, 3.2vw, 2.8rem); line-height: 1.2; overflow-wrap: anywhere; text-wrap: balance}
 </style>''', unsafe_allow_html=True)
-st.title('🛡️ Six-Attack Security Monitor')
+st.title('Development of an Anomaly-Driven Active Defense Platform Against Unauthorized Access and Credential Attacks')
 st.caption('LOCAL SOC • Rule-based indicators • Possible suspicious activity requires investigation')
 mode = st.sidebar.radio('Data environment', ['Live monitoring', 'Demonstration'])
 category = st.sidebar.selectbox('Attack category', ['All', *CATEGORIES])
@@ -34,7 +34,7 @@ data = Path(os.environ.get('SIX_DATA', 'data'))
 def dashboard():
     path = data / ('demo.db' if mode == 'Demonstration' else 'live.db')
     if mode == 'Live monitoring' and not path.exists():
-        st.warning('Collector not started. Use the installed Activate SOC Monitoring launcher for one-time setup.')
+        st.warning('Collector not started. Use the installed Active Defense Platform — Start Monitoring launcher for one-time setup.')
         engine = Engine(':memory:', settings)
     else:
         try:
@@ -49,7 +49,7 @@ def dashboard():
     try:
         if mode == 'Demonstration':
             st.info('SIMULATED DATA — isolated from live monitoring. Each run replaces the previous demo dataset.')
-            if st.button('Run six-category demonstration'):
+            if st.button('Run detection demonstration'):
                 with engine.db:
                     engine.db.execute('DELETE FROM matches')
                     engine.db.execute('DELETE FROM alerts')
@@ -68,7 +68,7 @@ def dashboard():
                 st.warning('Background collector: ' + status)
             if health.get('error'):
                 st.error(health['error'])
-            st.subheader('Six-Category Lab Readiness')
+            st.subheader('Detection & Monitoring Readiness')
             st.caption('Target/source health is separate from live validation. Unit tests and demonstration data never mark a lab category verified.')
             st.dataframe(pd.DataFrame(readiness(settings, health)), hide_index=True, width='stretch')
             last = health.get('last_event')

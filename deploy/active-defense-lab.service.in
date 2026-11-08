@@ -1,5 +1,5 @@
 [Unit]
-Description=Six-Attack SOC loopback-only isolated lab targets
+Description=Anomaly-Driven Active Defense Platform loopback-only isolated lab targets
 StartLimitIntervalSec=60
 StartLimitBurst=3
 

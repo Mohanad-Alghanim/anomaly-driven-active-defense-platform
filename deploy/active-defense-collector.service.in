@@ -1,5 +1,5 @@
 [Unit]
-Description=Six-Attack SOC background telemetry collector
+Description=Anomaly-Driven Active Defense Platform background telemetry collector
 StartLimitIntervalSec=60
 StartLimitBurst=5
 

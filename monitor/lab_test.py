@@ -49,7 +49,7 @@ def activity(name, root, settings):
         if time.monotonic()-started>settings['dos_window']:
             raise RuntimeError('Requests were too slow to reach the configured rate threshold')
     elif name=='file':
-        p['watched'].write_text('Six-Attack lab test\nmode=changed-'+str(time.time_ns())+'\n')
+        p['watched'].write_text('Active Defense Platform lab test\nmode=changed-'+str(time.time_ns())+'\n')
     elif name=='privilege':
         probe(root)
 
@@ -58,14 +58,14 @@ def check_services(root,data,settings,require_network=True,require_capability_ru
     p=paths(root)
     target=json.loads(p['health'].read_text()) if p['health'].exists() else {}
     if require_network and (target.get('status')!='RUNNING' or now()-target.get('heartbeat',0)>10):
-        raise RuntimeError('Lab targets are stopped/stale; use Start SOC Lab and Monitoring')
+        raise RuntimeError('Lab targets are stopped/stale; use Active Defense Platform — Start Monitoring')
     engine=Engine(data/'live.db',readonly=True)
     try:
         health=collector_health(engine,settings['poll_seconds'])
         if health['status'] not in ('RUNNING','DEGRADED'):
             raise RuntimeError('Background collector is not running: '+health['status'])
         if require_capability_rule and health.get('rules_version',2)<3:
-            raise RuntimeError('Restart SOC Lab and Monitoring once to load the new capability-denial rule')
+            raise RuntimeError('Active Defense Platform — Restart Monitoring once to load the new capability-denial rule')
         if not engine.state('hash:'+str(p['watched'].resolve())):
             raise RuntimeError('Collector has not established the lab file baseline yet; retry in a few seconds')
     finally:

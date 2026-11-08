@@ -13,7 +13,8 @@ WEB_PORT = 8088
 SSH_PORT = 2222
 SCAN_PORTS = tuple(range(9100, 9120))
 INVALID_USER = 'six-soc-invalid'
-BASELINE = b'Six-Attack SOC isolated lab configuration\nmode=baseline\n'
+# Historical integrity baseline: retain its exact bytes and authorized SHA-256.
+BASELINE = bytes.fromhex('5369782d41747461636b20534f432069736f6c61746564206c616220636f6e66696775726174696f6e0a6d6f64653d626173656c696e650a')
 
 
 def atomic_json(path, value):

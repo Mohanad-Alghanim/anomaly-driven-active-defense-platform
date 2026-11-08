@@ -1,4 +1,4 @@
-"""Six transparent rules, durable collection and SQLite storage."""
+"""Transparent detection rules, durable collection and SQLite storage."""
 import hashlib
 from copy import deepcopy
 import math

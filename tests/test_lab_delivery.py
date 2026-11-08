@@ -37,7 +37,7 @@ class LabDeliveryTests(unittest.TestCase):
 
     def test_working_directory_unquoted_regression_all_units(self):
         for name in ('collector','dashboard','lab'):
-            text=render_unit(self.root,f'six-soc-{name}.service')
+            text=render_unit(self.root,f'active-defense-{name}.service')
             parser=configparser.ConfigParser(interpolation=None,strict=False)
             parser.read_string(text)
             actual=parser['Service']['WorkingDirectory']
@@ -116,8 +116,8 @@ class LabDeliveryTests(unittest.TestCase):
 
     def test_generated_units_with_systemd_parser_when_available(self):
         # A real parser check, explicitly skipped when the execution sandbox blocks the manager.
-        unit=self.root/'six-soc-lab.service'
-        unit.write_text(render_unit(ROOT,'six-soc-lab.service'))
+        unit=self.root/'active-defense-lab.service'
+        unit.write_text(render_unit(ROOT,'active-defense-lab.service'))
         result=subprocess.run(['systemd-analyze','--user','verify',str(unit)],capture_output=True,text=True,timeout=15)
         if 'Operation not permitted' in result.stderr or 'Failed to connect' in result.stderr:
             self.skipTest('Sandbox blocks systemd user-manager validation')
@@ -130,13 +130,13 @@ class LabDeliveryTests(unittest.TestCase):
         units.mkdir(parents=True)
         before={}
         for name in ('collector','dashboard'):
-            path=units/f'six-soc-{name}.service'
+            path=units/f'active-defense-{name}.service'
             path.write_text('WorkingDirectory=/manually/repaired\n')
             before[path]=path.read_bytes()
         with patch('monitor.lab_setup.provision'):
             prepare_lab(self.root,home)
         for path,content in before.items(): self.assertEqual(path.read_bytes(),content)
-        self.assertTrue((units/'six-soc-lab.service').exists())
+        self.assertTrue((units/'active-defense-lab.service').exists())
 
     def test_lab_control_cancel_never_enables_services(self):
         from argparse import Namespace

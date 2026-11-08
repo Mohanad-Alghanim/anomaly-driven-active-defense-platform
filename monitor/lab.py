@@ -54,7 +54,7 @@ class Catalog:
 
 def handler_for(p, catalog):
     class Handler(BaseHTTPRequestHandler):
-        server_version='SixAttackLab/1'
+        server_version='ActiveDefenseLab/1'
         timeout=2
         def setup(self):
             self.request.settimeout(2)
@@ -67,7 +67,7 @@ def handler_for(p, catalog):
                 if len(self.path)>2048:
                     status,payload=414,dict(error='Request too long')
                 elif parts.path=='/health':
-                    status,payload=200,dict(target='six-attack-loopback-lab',status='RUNNING')
+                    status,payload=200,dict(target='active-defense-loopback-lab',status='RUNNING')
                 elif parts.path=='/search':
                     try:
                         payload=dict(results=catalog.search(parse_qs(parts.query).get('q',[''])[0]))
