@@ -10,9 +10,9 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-CATEGORIES = ('SSH Brute Force', 'Port Scanning', 'SQL Injection', 'Denial of Service (DoS)', 'Unauthorized File Modification', 'Suspicious Privilege Escalation')
+CATEGORIES = ('SSH Brute Force', 'Port Scanning', 'SQL Injection', 'Denial of Service (DoS)', 'Unauthorized File Modification', 'Suspicious Privilege Escalation', 'Periodic Beaconing')
 DEFAULT = dict(ssh_count=5, ssh_window=60, port_count=15, port_window=60, dos_count=50, dos_window=10, sources=[], files=[], poll_seconds=2, batch_lines=1000, max_line_bytes=65536, max_file_bytes=33554432, max_events=200000, max_database_bytes=268435456, journal={'enabled': True, 'lookback_seconds': 300})
-ACTIONS = ('Review SSH activity; restrict access and use keys.', 'Review firewall telemetry and restrict unnecessary ports.', 'Review application logs and use parameterized queries.', 'Review traffic and apply suitable rate limits.', 'Verify the change with the owner and restore a trusted copy if needed.', 'Review privileged commands and account permissions.')
+ACTIONS = ('Review SSH activity; restrict access and use keys.', 'Review firewall telemetry and restrict unnecessary ports.', 'Review application logs and use parameterized queries.', 'Review traffic and apply suitable rate limits.', 'Verify the change with the owner and restore a trusted copy if needed.', 'Review privileged commands and account permissions.', 'Investigate repeated periodic connections and verify whether the destination is authorized.')
 SQL = re.compile(r"union\s+(?:all\s+)?select|(?:'|\")\s*or\s+['\"]?1['\"]?\s*=\s*['\"]?1|;\s*drop\s+table|--", re.I)
 PRIV = re.compile(r'LAB_PRIVILEGE_DENIED operation=(?:setuid target_uid=0|capset capability=CAP_SETUID) errno=1\b|authentication failure|not in the sudoers|COMMAND=.*(?:/bin/(?:ba)?sh|chmod\s+[+]s|usermod\s+.*-aG\s+sudo)', re.I)
 
@@ -173,6 +173,19 @@ class Engine:
                 hits.append((0, f"At least {self.c['ssh_count']} failures in {self.c['ssh_window']} seconds"))
             if kind == 'connection' and ip and window(self.c['port_window'], True) >= self.c['port_count']:
                 hits.append((1, f"At least {self.c['port_count']} distinct ports in {self.c['port_window']} seconds"))
+            if kind == 'connection' and ip and dst_ip:
+                beacon_rows = self.db.execute(
+                    "SELECT ts FROM events WHERE kind='connection' AND ip=? AND dst_ip=? AND port=? AND ts BETWEEN ? AND ? ORDER BY ts DESC LIMIT 6",
+                    (ip, dst_ip, port, ts - 300, ts)
+                ).fetchall()
+                if len(beacon_rows) == 6:
+                    times = sorted(float(row['ts']) for row in beacon_rows)
+                    intervals = [b - a for a, b in zip(times, times[1:])]
+                    average = sum(intervals) / len(intervals)
+                    if average > 0 and max(intervals) <= 60:
+                        deviation = math.sqrt(sum((x - average) ** 2 for x in intervals) / len(intervals))
+                        if deviation / average <= 0.20:
+                            hits.append((6, 'At least 6 connections to the same destination and port with regular intervals within 300 seconds'))
             if kind == 'http' and SQL.search(e['message']):
                 hits.append((2, 'HTTP request matched a predefined SQL pattern'))
             if kind == 'http' and ip and window(self.c['dos_window']) >= self.c['dos_count']:
@@ -185,7 +198,7 @@ class Engine:
                 severity = 'HIGH' if index in (0, 2, 4, 5) else 'MEDIUM'
                 description = f'Possible {CATEGORIES[index]} indicator: {e["message"]}'
                 self.db.execute('INSERT OR IGNORE INTO matches VALUES (?,?,?,?,?,?,?)', (eid, CATEGORIES[index], detected, severity, rule, description, ACTIONS[index]))
-                seconds = self.c['ssh_window'] if index == 0 else self.c['port_window'] if index == 1 else self.c['dos_window'] if index == 3 else 0
+                seconds = self.c['ssh_window'] if index == 0 else self.c['port_window'] if index == 1 else self.c['dos_window'] if index == 3 else 60 if index == 6 else 0
                 previous = self.db.execute('SELECT 1 FROM alerts WHERE attack=? AND ip IS ? AND event_ts BETWEEN ? AND ?', (CATEGORIES[index], ip, ts-seconds, ts)).fetchone() if seconds else None
                 if not previous:
                     self.db.execute('INSERT INTO alerts(event_id,attack,ts,event_ts,ip,severity,rule,description,action) VALUES (?,?,?,?,?,?,?,?,?)', (eid, CATEGORIES[index], detected, ts, ip, severity, rule, description, ACTIONS[index]))

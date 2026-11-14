@@ -21,7 +21,7 @@ class MonitorTests(unittest.TestCase):
     def test_all_six_rules_and_alert_fields(self):
         for event in events():
             self.e.process(event)
-        self.assertEqual(set(a['attack'] for a in self.e.rows('alerts')), set(CATEGORIES))
+        self.assertEqual(set(a['attack'] for a in self.e.rows('alerts')), set(CATEGORIES[:6]))
         self.assertEqual(len(self.e.rows('alerts')), 6)
         for alert in self.e.rows('alerts'):
             for field in ('attack', 'ts', 'severity', 'rule', 'description', 'action', 'event_id'):
@@ -66,6 +66,26 @@ class MonitorTests(unittest.TestCase):
         for i in range(20):
             self.e.process(dict(ts=i, kind='connection', ip='192.0.2.1', port=80, message=str(i)))
         self.assertEqual(self.e.rows('alerts'), [])
+
+    def test_periodic_beaconing_detected(self):
+        result = []
+        for i in range(6):
+            result = self.e.process(dict(
+                ts=i * 10, kind='connection', ip='192.0.2.10',
+                dst_ip='198.51.100.20', port=443, message=f'periodic {i}'
+            ))
+        self.assertIn('Periodic Beaconing', result)
+        alerts = [a for a in self.e.rows('alerts') if a['attack'] == 'Periodic Beaconing']
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0]['severity'], 'MEDIUM')
+
+    def test_irregular_connections_not_beaconing(self):
+        for i, ts in enumerate([0, 2, 9, 13, 31, 52]):
+            self.e.process(dict(
+                ts=ts, kind='connection', ip='192.0.2.11',
+                dst_ip='198.51.100.21', port=443, message=f'irregular {i}'
+            ))
+        self.assertFalse(any(a['attack'] == 'Periodic Beaconing' for a in self.e.rows('alerts')))
 
     def test_configurable_dos_boundary(self):
         self.e.c.update(dos_count=3, dos_window=2)
@@ -150,7 +170,7 @@ class MonitorTests(unittest.TestCase):
         collect(self.e)
         collect(self.e)
         self.assertEqual(len(self.e.rows('events')), 74)
-        self.assertEqual({a['attack'] for a in self.e.rows('alerts')}, set(CATEGORIES))
+        self.assertEqual({a['attack'] for a in self.e.rows('alerts')}, set(CATEGORIES[:6]))
 
     def test_rotation(self):
         path = Path(self.tmp.name)/'log.jsonl'

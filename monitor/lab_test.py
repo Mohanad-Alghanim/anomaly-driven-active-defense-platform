@@ -16,7 +16,7 @@ from .privilege_probe import probe
 from .views import collector_health, snapshot
 from .ssh_lab import failed_logins, collected_failures
 
-NAMES = dict(ssh=CATEGORIES[0],scan=CATEGORIES[1],sql=CATEGORIES[2],dos=CATEGORIES[3],file=CATEGORIES[4],privilege=CATEGORIES[5])
+NAMES = dict(ssh=CATEGORIES[0],scan=CATEGORIES[1],sql=CATEGORIES[2],dos=CATEGORIES[3],file=CATEGORIES[4],privilege=CATEGORIES[5],beacon=CATEGORIES[6])
 
 
 def web(path):
@@ -35,6 +35,12 @@ def activity(name, root, settings):
             with socket.create_connection(('127.0.0.1',port),timeout=2):
                 pass
             time.sleep(0.05)
+    elif name=='beacon':
+        for i in range(6):
+            with socket.create_connection(('127.0.0.1', SCAN_PORTS[0]), timeout=2):
+                pass
+            if i < 5:
+                time.sleep(2)
     elif name=='sql':
         result=web('/search?q='+quote("' OR 1=1 --",safe=''))
         if len(result.get('results',[]))!=2:
@@ -92,7 +98,7 @@ def wait_clean_window(name,data,settings):
 
 def wait_alert(name, data, after_id, root, timeout=20):
     p=paths(root)
-    source=str(p[{'ssh':'auth','scan':'connections','sql':'access','dos':'access','file':'watched','privilege':'privilege'}[name]])
+    source=str(p[{'ssh':'auth','scan':'connections','sql':'access','dos':'access','file':'watched','privilege':'privilege','beacon':'connections'}[name]])
     deadline=time.monotonic()+timeout
     while time.monotonic()<deadline:
         engine=Engine(data/'live.db',readonly=True)
@@ -112,10 +118,17 @@ def wait_alert(name, data, after_id, root, timeout=20):
 
 
 def run_case(name,root,settings,data):
-    check_services(root,data,settings,require_network=name in ('ssh','scan','sql','dos'),require_capability_rule=name=='privilege')
+    check_services(root,data,settings,require_network=name in ('ssh','scan','sql','dos','beacon'),require_capability_rule=name=='privilege')
     wait_clean_window(name,data,settings)
     engine=Engine(data/'live.db',readonly=True)
     try:
+        if name == 'beacon':
+            recent = engine.db.execute(
+                'SELECT 1 FROM alerts WHERE attack=? AND ip=? AND event_ts>=? LIMIT 1',
+                (NAMES[name], '127.0.0.1', now()-60)
+            ).fetchone()
+            if recent:
+                raise RuntimeError('A recent Beaconing alert is still inside its cooldown; retry after 60 seconds')
         previous=engine.db.execute('SELECT COALESCE(MAX(id),0) FROM alerts').fetchone()[0]
     finally:
         engine.close()

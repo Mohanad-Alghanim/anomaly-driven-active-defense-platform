@@ -1,0 +1,210 @@
+{
+  "dataset": "Anomaly_Defense_Team_Dataset_AI_READY.xlsx",
+  "dataset_type": "synthetic_only",
+  "records": 2158,
+  "sessions": 171,
+  "features": [
+    "failed_auth_count_60s",
+    "distinct_ports_60s",
+    "requests_10s",
+    "sql_pattern_match",
+    "file_hash_changed",
+    "capability_denied"
+  ],
+  "model": "DecisionTreeClassifier",
+  "model_config": {
+    "max_depth": 6,
+    "min_samples_leaf": 2,
+    "class_weight": "balanced",
+    "random_state": 42
+  },
+  "validation": "4-fold StratifiedGroupKFold by session_id",
+  "out_of_fold_accuracy": 1.0,
+  "out_of_fold_macro_f1": 1.0,
+  "folds": [
+    {
+      "fold": 1,
+      "train_records": 1618,
+      "test_records": 540,
+      "train_sessions": 129,
+      "test_sessions": 42,
+      "accuracy": 1.0,
+      "macro_f1": 1.0
+    },
+    {
+      "fold": 2,
+      "train_records": 1618,
+      "test_records": 540,
+      "train_sessions": 126,
+      "test_sessions": 45,
+      "accuracy": 1.0,
+      "macro_f1": 1.0
+    },
+    {
+      "fold": 3,
+      "train_records": 1619,
+      "test_records": 539,
+      "train_sessions": 129,
+      "test_sessions": 42,
+      "accuracy": 1.0,
+      "macro_f1": 1.0
+    },
+    {
+      "fold": 4,
+      "train_records": 1619,
+      "test_records": 539,
+      "train_sessions": 129,
+      "test_sessions": 42,
+      "accuracy": 1.0,
+      "macro_f1": 1.0
+    }
+  ],
+  "classification_report": {
+    "DoS Indicator": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 400.0
+    },
+    "Port Scanning": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 120.0
+    },
+    "SQL Injection": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 8.0
+    },
+    "SSH Brute Force": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 40.0
+    },
+    "Suspicious Privilege Escalation": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 8.0
+    },
+    "Unauthorized File Modification": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 8.0
+    },
+    "none": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 1574.0
+    },
+    "accuracy": 1.0,
+    "macro avg": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 2158.0
+    },
+    "weighted avg": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 2158.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      400,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      120,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      8,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      40,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      8,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      8,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1574
+    ]
+  ],
+  "class_order": [
+    "DoS Indicator",
+    "Port Scanning",
+    "SQL Injection",
+    "SSH Brute Force",
+    "Suspicious Privilege Escalation",
+    "Unauthorized File Modification",
+    "none"
+  ],
+  "feature_importance": {
+    "failed_auth_count_60s": 0.1666666666666581,
+    "distinct_ports_60s": 0.1666666666666629,
+    "requests_10s": 0.1666666666666799,
+    "sql_pattern_match": 0.16666666666667504,
+    "file_hash_changed": 0.16666666666665972,
+    "capability_denied": 0.1666666666666644
+  },
+  "tree_depth": 6,
+  "tree_leaves": 7,
+  "decision_rules": "|--- distinct_ports_60s <= 8.000\n|   |--- failed_auth_count_60s <= 2.500\n|   |   |--- capability_denied <= 0.500\n|   |   |   |--- sql_pattern_match <= 0.500\n|   |   |   |   |--- requests_10s <= 25.500\n|   |   |   |   |   |--- file_hash_changed <= 0.500\n|   |   |   |   |   |   |--- class: none\n|   |   |   |   |   |--- file_hash_changed >  0.500\n|   |   |   |   |   |   |--- class: Unauthorized File Modification\n|   |   |   |   |--- requests_10s >  25.500\n|   |   |   |   |   |--- class: DoS Indicator\n|   |   |   |--- sql_pattern_match >  0.500\n|   |   |   |   |--- class: SQL Injection\n|   |   |--- capability_denied >  0.500\n|   |   |   |--- class: Suspicious Privilege Escalation\n|   |--- failed_auth_count_60s >  2.500\n|   |   |--- class: SSH Brute Force\n|--- distinct_ports_60s >  8.000\n|   |--- class: Port Scanning\n",
+  "limitations": [
+    "Training and validation data are synthetic.",
+    "Perfect synthetic validation does not establish real-world detection accuracy.",
+    "Rare attack classes have only eight independent sessions each.",
+    "The model is an advisory classifier, not proof of an attack."
+  ]
+}
