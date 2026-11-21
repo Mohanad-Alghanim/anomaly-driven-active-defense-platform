@@ -1,6 +1,8 @@
-"""Bounded read models for dashboard and source coverage; no ingestion."""
+"""Bounded read models for the dashboard; no ingestion."""
 import json
-from .core import CATEGORIES, now
+from .core import now
+
+LEVEL_ORDER = ('high', 'medium', 'low')
 
 
 def collector_health(engine, poll_seconds=2):
@@ -15,52 +17,44 @@ def collector_health(engine, poll_seconds=2):
     return health
 
 
-def coverage(settings, statuses):
-    by_source = {s['source']: s for s in statuses}
-    needed = ('ssh_failed', 'connection', 'http', 'http', 'file', 'privilege')
-    rows = []
-    for attack, kind in zip(CATEGORIES, needed):
-        candidates = []
-        for source in settings['sources']:
-            fmt = source.get('format', 'jsonl')
-            kinds = source.get('kinds', ['ssh_failed', 'privilege'] if fmt == 'auth' else ['connection'] if fmt == 'netfilter' else ['http'] if fmt == 'http_access' else [])
-            if kind in kinds:
-                candidates.append(source['path'])
-        if kind == 'file':
-            candidates += [entry['path'] for entry in settings['files']]
-        if settings['journal'].get('enabled', True) and (kind in ('ssh_failed', 'privilege') or (kind == 'connection' and settings['journal'].get('kernel_netfilter', False))):
-            candidates.append('systemd Journal')
-        ready = [name for name in candidates if by_source.get(name, {}).get('available')]
-        status = 'Source readable; event coverage unverified' if ready else 'Source unavailable / not polled' if candidates else 'Not configured'
-        rows.append(dict(category=attack, telemetry_status=status, sources=', '.join(candidates) or 'None'))
-    return rows
+def _has_table(engine, name):
+    return engine.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
 
 
-def snapshot(engine, cutoff, category='All', limit=1000):
-    params = [cutoff]
-    where = 'e.ts >= ?'
-    if category != 'All':
-        where += ' AND EXISTS (SELECT 1 FROM matches m WHERE m.event_id=e.id AND m.attack=?)'
-        params.append(category)
-    counts = engine.db.execute(f"SELECT COUNT(*),COALESCE(SUM(status='NORMAL'),0),COALESCE(SUM(status='ABNORMAL'),0) FROM events e WHERE {where}", params).fetchone()
-    ev = [dict(row) for row in engine.db.execute(f'''SELECT e.*,
-          (SELECT group_concat(attack, ' | ') FROM matches m WHERE m.event_id=e.id) AS attack,
-          (SELECT MAX(ts) FROM matches m WHERE m.event_id=e.id) AS detection_ts,
-          (SELECT group_concat(severity, ' | ') FROM matches m WHERE m.event_id=e.id) AS severity,
-          (SELECT group_concat(rule, ' | ') FROM matches m WHERE m.event_id=e.id) AS rule,
-          (SELECT group_concat(description, ' | ') FROM matches m WHERE m.event_id=e.id) AS explanation,
-          (SELECT group_concat(action, ' | ') FROM matches m WHERE m.event_id=e.id) AS recommendation
-          FROM events e WHERE {where} ORDER BY e.ts DESC LIMIT ?''', [*params, limit])]
-    awhere = 'a.event_ts >= ?'
-    apar = [cutoff]
-    if category != 'All':
-        awhere += ' AND a.attack=?'
-        apar.append(category)
-    alerts = [dict(row) for row in engine.db.execute(f'''SELECT a.*,e.dst_ip,e.dst_host,e.port AS dst_port,e.source_port,e.status,e.source
-         FROM alerts a LEFT JOIN events e ON e.id=a.event_id WHERE {awhere} ORDER BY a.ts DESC LIMIT ?''', [*apar, limit])]
-    distribution = [dict(row) for row in engine.db.execute(f'SELECT attack,COUNT(*) AS alerts FROM alerts a WHERE {awhere} GROUP BY attack', apar)]
-    span = now()-cutoff
+def employee_table(engine):
+    """Every employee with a rolling risk, highest risk first."""
+    if not _has_table(engine, 'employee_risk'):
+        return []
+    return [dict(row) for row in engine.db.execute('SELECT * FROM employee_risk ORDER BY risk DESC, employee_id')]
+
+
+def snapshot(engine, cutoff, limit=500):
+    """Window summary: scored-event counts by level, timeline and recent elevated events."""
+    columns = {row[1] for row in engine.db.execute('PRAGMA table_info(events)')}
+    if 'level' not in columns:
+        return dict(counts=dict(total=0, scored=0, high=0, medium=0, low=0, unattributed=0), timeline=[], elevated=[], employees=[])
+    total, scored, high, medium, low, unattributed = engine.db.execute(
+        "SELECT COUNT(*), COALESCE(SUM(score IS NOT NULL),0), COALESCE(SUM(level='high'),0), COALESCE(SUM(level='medium'),0), "
+        "COALESCE(SUM(level='low'),0), COALESCE(SUM(employee_id IS NULL AND score IS NOT NULL),0) FROM events WHERE ts >= ?", (cutoff,)).fetchone()
+    span = now() - cutoff
     bucket = 86400 if span > 31*86400 else 3600 if span > 2*86400 else 300 if span > 7200 else 60
-    timeline = [dict(row) for row in engine.db.execute(f'SELECT CAST(e.ts/{bucket} AS INTEGER)*{bucket} AS ts,e.status,COUNT(*) AS events FROM events e WHERE {where} GROUP BY 1,2 ORDER BY 1', params)]
-    return dict(counts=tuple(counts), alerts=alerts, events=ev, distribution=distribution, timeline=timeline,
-                total_alerts=sum(r['alerts'] for r in distribution))
+    timeline = [dict(row) for row in engine.db.execute(
+        f'SELECT CAST(ts/{bucket} AS INTEGER)*{bucket} AS ts, level, COUNT(*) AS events FROM events '
+        'WHERE ts >= ? AND level IS NOT NULL GROUP BY 1,2 ORDER BY 1', (cutoff,))]
+    elevated = [dict(row) for row in engine.db.execute(
+        "SELECT id, ts, employee_id, ip, dst_ip, dst_service, protocol, port, kind, score, level, message FROM events "
+        "WHERE ts >= ? AND level IN ('high','medium') ORDER BY score DESC LIMIT ?", (cutoff, limit))]
+    return dict(counts=dict(total=total, scored=scored, high=high, medium=medium, low=low, unattributed=unattributed),
+                timeline=timeline, elevated=elevated, employees=employee_table(engine))
+
+
+def employee_events(engine, employee_id, limit=200):
+    return [dict(row) for row in engine.db.execute(
+        'SELECT id, ts, ip, dst_ip, dst_service, protocol, port, kind, bytes_in, bytes_out, response_ms, prev_hour, '
+        'features, score, level, message FROM events WHERE employee_id=? ORDER BY ts DESC LIMIT ?', (employee_id, limit))]
+
+
+def unattributed_events(engine, cutoff, limit=200):
+    return [dict(row) for row in engine.db.execute(
+        'SELECT id, ts, source, kind, ip, dst_ip, dst_service, score, level, message FROM events '
+        'WHERE ts >= ? AND employee_id IS NULL AND score IS NOT NULL ORDER BY ts DESC LIMIT ?', (cutoff, limit))]

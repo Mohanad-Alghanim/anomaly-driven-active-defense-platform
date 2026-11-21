@@ -1,16 +1,26 @@
-"""Safe, repeatable telemetry; no attacks or external operations."""
+"""Demonstration telemetry: an unlabelled replay of held-out dataset events.
+
+samples/behavioral_demo.jsonl holds 48 hours of synthetic organisation activity
+(exported by monitor.brain.train, without labels). Timestamps are shifted by whole
+weeks so the replay ends near now while every event keeps its weekday and local time.
+"""
+import json
+from pathlib import Path
+
 from .core import now
 
+SAMPLE = Path(__file__).resolve().parents[1] / 'samples' / 'behavioral_demo.jsonl'
+WEEK = 7 * 86400
 
-def events(base=None):
-    t = base if base is not None else now() - 70
-    result = [dict(ts=t, kind='normal', message='Successful routine activity', source='DEMO', ip='192.0.2.1')]
-    for i in range(5):
-        result.append(dict(ts=t+i, kind='ssh_failed', ip='192.0.2.10', message='Failed password for student', source='DEMO'))
-    for i in range(15):
-        result.append(dict(ts=t+i, kind='connection', ip='192.0.2.20', port=8000+i, message='Firewall connection attempt', source='DEMO'))
-    result.append(dict(ts=t+20, kind='http', ip='192.0.2.30', message="GET /?q=' OR 1=1", source='DEMO'))
-    for i in range(50):
-        result.append(dict(ts=t+30+i/10, kind='http', ip='192.0.2.40', message='GET /index', source='DEMO'))
-    result += [dict(ts=t+40, kind='file', message='Test configuration content changed', source='DEMO'), dict(ts=t+41, kind='privilege', message='sudo: user not in the sudoers', source='DEMO')]
-    return result
+
+def events(base=None, path=SAMPLE):
+    records = [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
+    if not records:
+        return []
+    target = base if base is not None else now()
+    latest = max(r['ts'] for r in records)
+    shift = ((target - latest) // WEEK) * WEEK
+    for r in records:
+        r['ts'] = r['ts'] + shift
+        r['source'] = 'DEMO'
+    return records

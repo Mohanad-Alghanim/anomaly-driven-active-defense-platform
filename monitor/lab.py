@@ -1,4 +1,7 @@
-"""Instrumented loopback-only targets: real HTTP, TCP accepts and isolated OpenSSH."""
+"""Instrumented loopback-only lab target: an Internal Web service with a real access log.
+
+Phase 3 insider-scenario scripts write behavioural telemetry to runtime/lab/telemetry.jsonl.
+"""
 import argparse
 from datetime import datetime, timezone
 import fcntl
@@ -6,17 +9,12 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
 from pathlib import Path
-import selectors
-import shutil
 import signal
-import socket
 import sqlite3
-import subprocess
 import threading
-import time
 from urllib.parse import parse_qs, urlsplit
 from .core import now
-from .lab_setup import WEB_PORT, SSH_PORT, SCAN_PORTS, paths, atomic_json, ssh_configuration
+from .lab_setup import WEB_PORT, paths, atomic_json
 
 LOG_LIMIT = 8 * 1024 * 1024  # Three retained generations, per log.
 
@@ -93,26 +91,13 @@ def handler_for(p, catalog):
     return Handler
 
 
-def record_connection(listener, log):
-    connection, peer = listener.accept()
-    try:
-        destination=connection.getsockname()
-        event=dict(ts=now(),kind='connection',ip=peer[0],source_port=peer[1],
-                   dst_ip=destination[0],dst_port=destination[1],message='Lab TCP connection accepted')
-        append(log,json.dumps(event)+'\n')
-    finally:
-        connection.close()
-
-
 def run(root, stop=None):
     if os.geteuid()==0:
         raise RuntimeError('Lab targets must run as the normal Kali user')
     os.umask(0o077)
     p=paths(root)
-    if not p['ssh_config'].exists():
+    if not p['telemetry'].exists():
         raise RuntimeError('Run one-time lab preparation first')
-    if p['ssh_config'].read_text() != ssh_configuration(p):
-        raise RuntimeError('Refusing an altered SSH configuration; loopback isolation must be preserved')
     stop=stop or threading.Event()
     health=dict(heartbeat=now(),status='STARTING',components={})
     with (p['runtime']/'lab.lock').open('a') as lock:
@@ -121,63 +106,24 @@ def run(root, stop=None):
         except BlockingIOError:
             raise RuntimeError('Lab already owns its runtime directory') from None
         catalog=Catalog()
-        listeners=[]
         web=None
-        child=None
-        pump=None
-        ready=threading.Event()
         try:
-            with selectors.DefaultSelector() as selector:
-                web=HTTPServer(('127.0.0.1',WEB_PORT),handler_for(p,catalog))
-                selector.register(web.socket,selectors.EVENT_READ,('web',web))
-                for port in SCAN_PORTS:
-                    listener=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-                    listeners.append(listener)
-                    listener.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
-                    listener.bind(('127.0.0.1',port))
-                    listener.listen(32)
-                    selector.register(listener,selectors.EVENT_READ,('connection',listener))
-                sshd=shutil.which('sshd') or '/usr/sbin/sshd'
-                subprocess.run([sshd,'-t','-f',str(p['ssh_config'])],check=True,capture_output=True,timeout=10)
-                child=subprocess.Popen([sshd,'-D','-e','-f',str(p['ssh_config'])],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
-                def pump_ssh():
-                    for raw in iter(child.stderr.readline,b''):
-                        line=raw.decode(errors='replace')[:8192].strip()
-                        append(p['auth'],datetime.now(timezone.utc).isoformat()+' lab sshd: '+line+'\n')
-                        if f'Server listening on 127.0.0.1 port {SSH_PORT}' in line:
-                            ready.set()
-                pump=threading.Thread(target=pump_ssh,daemon=True)
-                pump.start()
-                if not ready.wait(6):
-                    raise RuntimeError('Isolated SSH did not become ready; inspect runtime/lab/ssh-auth.log')
-                health.update(status='RUNNING',components=dict(web='RUNNING',connections='RUNNING',ssh='RUNNING',file='RUNNING' if p['watched'].is_file() else 'STOPPED',privilege='AVAILABLE'))
-                while not stop.is_set():
-                    if child.poll() is not None:
-                        raise RuntimeError('Isolated SSH exited; stopping lab to avoid partial readiness')
-                    for key,_ in selector.select(timeout=0.5):
-                        kind,target=key.data
-                        if kind=='web':
-                            web._handle_request_noblock()
-                        else:
-                            record_connection(target,p['connections'])
-                    health['heartbeat']=now()
-                    atomic_json(p['health'],health)
+            web=HTTPServer(('127.0.0.1',WEB_PORT),handler_for(p,catalog))
+            web.timeout=0.5
+            while not stop.is_set():
+                health.update(status='RUNNING',heartbeat=now(),components=dict(
+                    web='RUNNING', telemetry='AVAILABLE' if p['telemetry'].is_file() else 'STOPPED',
+                    file='RUNNING' if p['watched'].is_file() else 'STOPPED'))
+                atomic_json(p['health'],health)
+                web.handle_request()
         except Exception as exc:
             health.update(status='STOPPED',error=str(exc),heartbeat=now())
             raise
         finally:
-            if child is not None:
-                child.terminate()
-                try: child.wait(timeout=3)
-                except subprocess.TimeoutExpired: child.kill(); child.wait()
-                if pump: pump.join(timeout=2)
-                child.stderr.close()
-            for listener in listeners:
-                listener.close()
             if web: web.server_close()
             catalog.close()
             health.update(status='STOPPED',heartbeat=now())
-            health['components']={name:'STOPPED' for name in ('web','connections','ssh','file','privilege')}
+            health['components']={name:'STOPPED' for name in ('web','telemetry','file')}
             atomic_json(p['health'],health)
 
 

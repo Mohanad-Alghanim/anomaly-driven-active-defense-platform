@@ -1,10 +1,4 @@
 {
-  "ssh_count": 5,
-  "ssh_window": 60,
-  "port_count": 15,
-  "port_window": 60,
-  "dos_count": 50,
-  "dos_window": 10,
   "poll_seconds": 2,
   "batch_lines": 1000,
   "max_line_bytes": 65536,

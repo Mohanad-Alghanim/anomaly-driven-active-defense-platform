@@ -1,14 +1,18 @@
-"""Local Streamlit SOC dashboard. Run using start.sh."""
+"""Local Streamlit SOC dashboard: employees ranked by insider-threat risk. Run using start.sh."""
 from pathlib import Path
+import json
 import os
 import sqlite3
 from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
-from monitor.core import Engine, CATEGORIES, config, now
-from monitor.demo import events
-from monitor.views import collector_health, coverage, snapshot
+from monitor.core import Engine, config, now
+from monitor.demo import events as demo_events
+from monitor.views import collector_health, employee_events, snapshot, unattributed_events
 from monitor.lab_readiness import readiness
+from monitor.brain.explain import explain_employee
+
+LEVEL_BADGE = {'high': '🔴 HIGH', 'medium': '🟠 MEDIUM', 'low': '🟢 LOW'}
 
 st.set_page_config(page_title='Anomaly-Driven Active Defense Platform', layout='wide')
 st.markdown('''<style>
@@ -17,21 +21,77 @@ st.markdown('''<style>
 h1 {color: #68d9ef; font-size: clamp(1.5rem, 3.2vw, 2.8rem); line-height: 1.2; overflow-wrap: anywhere; text-wrap: balance}
 </style>''', unsafe_allow_html=True)
 st.title('Development of an Anomaly-Driven Active Defense Platform Against Unauthorized Access and Credential Attacks')
-st.caption('LOCAL SOC • Rule-based indicators • Possible suspicious activity requires investigation')
-mode = st.sidebar.radio(
-    'Data environment',
-    ['Live monitoring', 'Demonstration', 'Dataset Analysis']
-)
-if mode != 'Dataset Analysis':
-    category = st.sidebar.selectbox('Attack category', ['All', *CATEGORIES])
-    hours = st.sidebar.selectbox('Time range (hours)', [1, 24, 168, 8760], index=1)
-    st.sidebar.caption('Refreshes every 3 seconds while this dashboard is open.')
+st.caption('LOCAL SOC • Unsupervised insider-threat detection • Risk levels derived from normal behaviour • '
+           'A high score is a deviation requiring investigation, not proof of intent')
+mode = st.sidebar.radio('Data environment', ['Live monitoring', 'Demonstration'])
+hours = st.sidebar.selectbox('Event window (hours)', [1, 24, 168, 8760], index=2 if mode == 'Demonstration' else 1)
+st.sidebar.caption('Employee risk is rolling and independent of the event window. Refreshes every 3 seconds.')
 try:
     settings = config(os.environ.get('SIX_CONFIG', 'config.local.json'))
 except (ValueError, OSError) as exc:
     st.error(f'Configuration error: {exc}')
     st.stop()
 data = Path(os.environ.get('SIX_DATA', 'data'))
+
+
+def stamp(value, zone):
+    if not value:
+        return 'None yet'
+    return datetime.fromtimestamp(value, timezone.utc).astimezone(zone).strftime('%Y-%m-%d %H:%M:%S')
+
+
+def run_demo(engine):
+    with engine.db:
+        engine.db.execute('DELETE FROM events')
+        engine.db.execute('DELETE FROM employee_risk')
+    engine.event_count = 0
+    prepared = [engine.prepare(e) for e in demo_events()]
+    engine.ingest(prepared)
+
+
+def ranking_frame(employees, directory, zone):
+    rows = []
+    for rank, e in enumerate(employees, 1):
+        person = directory.employee(e['employee_id'])
+        rows.append({
+            'Rank': rank, 'Level': LEVEL_BADGE.get(e['level'], e['level']), 'Employee': e['employee_id'],
+            'Name': person.get('employee_name', ''), 'Department': person.get('department', ''),
+            'Job title': person.get('job_title', ''), 'Risk': round(e['risk'], 4),
+            'Percentile vs normal': round(e['risk_percentile'], 1), 'Peak risk': round(e['peak_risk'], 4),
+            'Last activity': stamp(e['last_ts'], zone), 'High-level events': e['high_events'], 'Events seen': e['events'],
+        })
+    return pd.DataFrame(rows)
+
+
+def analysis_panel(engine, employee, zone):
+    brain, directory = engine.brain, engine.directory
+    recent = employee_events(engine, employee['employee_id'])
+    report = explain_employee(brain, directory, employee, recent)
+    st.subheader(f"AI analysis — {employee['employee_id']}")
+    left, middle, right = st.columns(3)
+    left.metric('Risk level', employee['level'].upper())
+    middle.metric('Rolling risk score', f"{employee['risk']:.4f}")
+    right.metric('Higher than normal employees', f"{employee['risk_percentile']:.1f}%")
+    st.markdown(report['summary'])
+    if report['reasons']:
+        st.markdown('**Why: the largest deviations from this employee\'s own normal behaviour**')
+        st.markdown('\n'.join(f"- **{r['label']}** — {r['text']}" for r in report['reasons']))
+    st.caption(report['caveat'])
+    if recent:
+        frame = pd.DataFrame(recent)
+        frame['Time'] = [stamp(t, zone) for t in frame.ts]
+        frame['Level'] = frame.level.map(LEVEL_BADGE)
+        frame['Higher than normal events (%)'] = brain.event_percentile(frame.score.fillna(0)).round(1)
+        chart = frame[['ts', 'score']].assign(time=pd.to_datetime(frame.ts, unit='s', utc=True)).set_index('time')[['score']]
+        st.markdown('**Event anomaly scores over time**')
+        st.line_chart(chart.rename(columns={'score': 'event anomaly score'}))
+        st.markdown('**Recent events**')
+        st.dataframe(frame[['Time', 'Level', 'score', 'Higher than normal events (%)', 'dst_service', 'dst_ip', 'protocol', 'port',
+                            'bytes_in', 'bytes_out', 'response_ms', 'prev_hour', 'kind']].rename(columns={
+                                'score': 'Anomaly score', 'dst_service': 'Service', 'dst_ip': 'Destination', 'protocol': 'Protocol',
+                                'port': 'Port', 'bytes_in': 'Bytes in', 'bytes_out': 'Bytes out', 'response_ms': 'Response ms',
+                                'prev_hour': 'Events prev. hour', 'kind': 'Kind'}),
+                     hide_index=True, width='stretch')
 
 
 @st.fragment(run_every=3)
@@ -46,95 +106,110 @@ def dashboard():
         except sqlite3.Error as exc:
             st.error('Database unavailable: ' + str(exc))
             return
-    if mode == 'Live monitoring' and engine.db.execute('PRAGMA user_version').fetchone()[0] < 2 and path.exists():
-        st.warning('Database upgrade pending. Start the upgraded collector to migrate existing data safely.')
-        engine.close()
-        return
     try:
+        try:
+            brain, directory = engine.brain, engine.directory
+        except (OSError, ValueError) as exc:
+            st.error(f'Detection model unavailable: {exc}')
+            return
+        from zoneinfo import ZoneInfo
+        zone = ZoneInfo(directory.timezone)
+        statuses = []
         if mode == 'Demonstration':
-            st.info('SIMULATED DATA — isolated from live monitoring. Each run replaces the previous demo dataset.')
-            if st.button('Run detection demonstration'):
-                with engine.db:
-                    engine.db.execute('DELETE FROM matches')
-                    engine.db.execute('DELETE FROM alerts')
-                    engine.db.execute('DELETE FROM events')
-                engine.event_count = 0
-                for event in events():
-                    engine.process(event)
-            statuses = [dict(source='Built-in demonstration', status='Available; no attacks executed')]
+            st.info('DEMONSTRATION — an unlabelled replay of 48 hours of synthetic organisation activity, isolated from '
+                    'live monitoring. Each run replaces the previous demonstration data.')
+            if st.button('Run demonstration replay'):
+                run_demo(engine)
         else:
             health = collector_health(engine, settings['poll_seconds'])
             statuses = health.get('sources', [])
-            status = health['status']
-            if status == 'RUNNING':
-                st.success('Background collector: RUNNING • independent of Firefox')
+            if health['status'] == 'RUNNING':
+                st.success(f"Background collector: RUNNING • model {health.get('model_version', 'unknown')} • independent of the browser")
             else:
-                st.warning('Background collector: ' + status)
+                st.warning('Background collector: ' + health['status'])
             if health.get('error'):
                 st.error(health['error'])
-            st.subheader('Detection & Monitoring Readiness')
-            st.caption('Target/source health is separate from live validation. Unit tests and demonstration data never mark a lab category verified.')
-            st.dataframe(pd.DataFrame(readiness(settings, health)), hide_index=True, width='stretch')
-            last = health.get('last_event')
-            if last is None:
-                import json
-                last = json.loads(engine.state('last_event') or 'null')
-            def stamp(value):
-                return datetime.fromtimestamp(value, timezone.utc).isoformat() if value else 'None yet'
-            st.caption('Last heartbeat: ' + stamp(health.get('heartbeat')) +
-                       ' | Last successful event: ' + stamp(last.get('event_ts') if last else None) +
-                       ' | Last processed: ' + stamp(last.get('processed_ts') if last else None))
+            last = health.get('last_event') or json.loads(engine.state('last_event') or 'null')
+            st.caption('Last heartbeat: ' + stamp(health.get('heartbeat'), zone) +
+                       ' | Last event: ' + stamp(last.get('event_ts') if last else None, zone) +
+                       ' | Last processed: ' + stamp(last.get('processed_ts') if last else None, zone) + f' ({directory.timezone})')
         cutoff = now() - hours * 3600
         engine.db.execute('BEGIN')
         try:
-            view = snapshot(engine, cutoff, category)
+            view = snapshot(engine, cutoff)
         finally:
             engine.db.rollback()
-        alerts, ev = view['alerts'], view['events']
-        total, normal, abnormal = view['counts']
-        columns = st.columns(4)
-        for col, label, value in zip(columns, ['Total Events', 'Normal Events', 'Abnormal Events', 'Total Security Alerts'], [total, normal, abnormal, view['total_alerts']]):
+        employees, counts = view['employees'], view['counts']
+        cols = st.columns(5)
+        for col, label, value in zip(cols, ['Employees monitored', 'High risk', 'Medium risk', f'Events scored ({hours} h)', f'High-level events ({hours} h)'],
+                                     [len(employees), sum(e['level'] == 'high' for e in employees), sum(e['level'] == 'medium' for e in employees),
+                                      counts['scored'], counts['high']]):
             col.metric(label, value)
+
+        st.subheader('Employee risk ranking')
+        b = brain.employee_boundaries_
+        st.caption(f"Risk = time-decayed mean of each employee's recent event anomaly scores (half-life {brain.risk_half_life_hours:g} h); "
+                   f"event counts do not raise risk. Levels come from normal employee behaviour in calibration: "
+                   f"medium ≥ {b['medium']:.4f} (95th percentile), high ≥ {b['high']:.4f} (99th percentile). "
+                   'Select a row to open its AI analysis.')
+        if not employees:
+            st.info('No attributed employee activity yet.')
+        else:
+            frame = ranking_frame(employees, directory, zone)
+            selection = st.dataframe(frame, hide_index=True, width='stretch', on_select='rerun', selection_mode='single-row',
+                                     key='employee_table', height=420)
+            options = list(frame.Employee)
+            chosen = tuple(selection.selection.rows) if selection is not None else ()
+            if chosen and chosen != st.session_state.get('_applied_selection'):
+                st.session_state['_applied_selection'] = chosen
+                st.session_state['analyse_employee'] = options[chosen[0]]
+            if st.session_state.get('analyse_employee') not in options:
+                st.session_state['analyse_employee'] = options[0]
+            employee_id = st.selectbox('Employee to analyse', options, key='analyse_employee',
+                                       format_func=lambda e: f"{e} — {directory.employee(e).get('employee_name', '')}")
+            st.divider()
+            analysis_panel(engine, next(e for e in employees if e['employee_id'] == employee_id), zone)
+
+        st.divider()
         left, right = st.columns(2)
         with left:
-            st.subheader('Attack Distribution')
-            if alerts:
-                st.bar_chart(pd.DataFrame(view['distribution']).set_index('attack'))
-            else:
-                st.caption('No alerts in this selection.')
-        with right:
-            st.subheader('Security Events Timeline')
+            st.subheader('Scored events by level')
             if view['timeline']:
-                frame = pd.DataFrame(view['timeline'])
-                frame['time'] = pd.to_datetime(frame.ts, unit='s', utc=True)
-                st.line_chart(frame.pivot(index='time', columns='status', values='events').fillna(0))
-        st.subheader('Recent Alerts • HIGH 🔴 / MEDIUM 🟠')
-        if alerts:
-            frame = pd.DataFrame(alerts)
-            frame['event_at_utc'] = pd.to_datetime(frame.event_ts, unit='s', utc=True).astype(str)
-            frame['detected_at_utc'] = pd.to_datetime(frame.ts, unit='s', utc=True).astype(str)
-            st.dataframe(frame[['attack', 'event_at_utc', 'detected_at_utc', 'ip', 'source_port', 'dst_ip', 'dst_host', 'dst_port', 'status', 'severity', 'rule', 'description', 'action']], width='stretch', hide_index=True)
-        else:
-            st.caption('No alerts.')
-
-        st.subheader('Event Details')
-        if ev:
-            selected = st.selectbox('Select event', range(len(ev)), format_func=lambda i: f"{ev[i]['status']} | {ev[i]['kind']} | {ev[i]['message'][:70]}")
-            st.json(ev[selected])
-        st.subheader('Input Source Status')
-        if statuses:
-            st.dataframe(pd.DataFrame(statuses), hide_index=True, width='stretch')
-        else:
-            st.warning('No live sources configured. Configure readable auth logs, normalized HTTP/firewall logs, and test files.')
+                timeline = pd.DataFrame(view['timeline'])
+                timeline['time'] = pd.to_datetime(timeline.ts, unit='s', utc=True)
+                st.line_chart(timeline.pivot(index='time', columns='level', values='events').fillna(0))
+            else:
+                st.caption('No scored events in this window.')
+        with right:
+            st.subheader('Most unusual events in window')
+            if view['elevated']:
+                elevated = pd.DataFrame(view['elevated'])
+                elevated['Time'] = [stamp(t, zone) for t in elevated.ts]
+                elevated['Level'] = elevated.level.map(LEVEL_BADGE)
+                st.dataframe(elevated[['Time', 'Level', 'employee_id', 'dst_service', 'score']].rename(
+                    columns={'employee_id': 'Employee', 'dst_service': 'Service', 'score': 'Anomaly score'}),
+                    hide_index=True, width='stretch', height=300)
+            else:
+                st.caption('No medium- or high-level events in this window.')
+        with st.expander(f"Unattributed events ({counts['unattributed']}) — source address not mapped to an employee device"):
+            rows = unattributed_events(engine, cutoff)
+            if rows:
+                frame = pd.DataFrame(rows)
+                frame['Time'] = [stamp(t, zone) for t in frame.ts]
+                st.dataframe(frame[['Time', 'source', 'kind', 'ip', 'dst_service', 'score', 'level', 'message']], hide_index=True, width='stretch')
+            else:
+                st.caption('None.')
         if mode == 'Live monitoring':
-            st.dataframe(pd.DataFrame(coverage(settings, statuses)), hide_index=True, width='stretch')
-        st.caption('Time filters use event time. Details show up to 1,000 recent records; counts and charts include the full selection. Category filters include suppressed matching events.')
+            with st.expander('Collector, sources and lab health'):
+                lab_rows = readiness(settings, collector_health(engine, settings['poll_seconds']))
+                if lab_rows:
+                    st.dataframe(pd.DataFrame(lab_rows), hide_index=True, width='stretch')
+                if statuses:
+                    st.dataframe(pd.DataFrame(statuses), hide_index=True, width='stretch')
+                else:
+                    st.warning('No live sources configured. Configure readable auth logs, HTTP/firewall logs or behavioural JSONL telemetry.')
     finally:
         engine.close()
 
 
-if mode == 'Dataset Analysis':
-    from monitor.dataset_analysis import render_dataset_analysis
-    render_dataset_analysis()
-else:
-    dashboard()
+dashboard()

@@ -179,7 +179,7 @@ def lab_control(args):
             systemctl('stop',UNITS[1],UNITS[0],LAB_UNIT)
             dialog('Active Defense Platform monitoring stopped.')
     elif args.lab_start_gui or args.lab_restart_gui:
-        if dialog('Start/restart the Active Defense Platform monitoring and enable login startup?\n\nLoopback only: web 8088, isolated SSH 2222, TCP targets 9100–9119, dashboard 8501. No host firewall, SSH or system permissions are changed. No attack tests run automatically.',question=True):
+        if dialog('Start/restart the Active Defense Platform monitoring and enable login startup?\n\nLoopback only: lab web target 8088 and dashboard 8501. No host firewall, SSH or system permissions are changed. No scenario scripts run automatically.',question=True):
             prepare_lab()
             systemctl('daemon-reload')
             systemctl('reset-failed',*all_units)
@@ -191,7 +191,7 @@ def lab_control(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--prepare-lab', action='store_true', help='Provision lab sources, isolated targets and graphical controls without starting services')
+    group.add_argument('--prepare-lab', action='store_true', help='Provision lab sources, the loopback target and graphical controls without starting services')
     group.add_argument('--lab-start-gui', action='store_true')
     group.add_argument('--lab-stop-gui', action='store_true')
     group.add_argument('--lab-restart-gui', action='store_true')
@@ -217,7 +217,7 @@ def main():
                 systemctl('restart', *UNITS)
                 dialog('Services restarted. Open Anomaly-Driven Active Defense Platform to check source health.')
         elif args.activate_gui:
-            if dialog('Enable automatic monitoring after login and start the background collector and dashboard?\n\nThe dashboard listens only at 127.0.0.1:8501. Authentication Journal access is read-only. SSH, firewall rules and packet capture are unchanged.', question=True):
+            if dialog('Enable automatic monitoring after login and start the background collector and dashboard?\n\nThe dashboard listens only at 127.0.0.1:8501. Authentication Journal access is read-only. Firewall rules and packet capture are unchanged.', question=True):
                 dialog('Services activated:\n'+activate()+'\n\nOpen Anomaly-Driven Active Defense Platform from the applications menu.')
         else:
             print(activate())

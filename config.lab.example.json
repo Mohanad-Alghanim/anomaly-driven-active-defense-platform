@@ -1,9 +1,9 @@
 {
   "journal": {"enabled": true, "lookback_seconds": 300},
   "sources": [
-    {"path": "/path/to/existing/lab-access.log", "format": "http_access", "destination": "isolated-lab", "destination_port": 8080},
+    {"path": "/path/to/existing/lab-access.log", "format": "http_access", "destination_ip": "10.20.1.10", "destination_service": "Internal Web", "protocol": "TCP", "destination_port": 443},
     {"path": "/path/to/existing/lab-firewall.log", "format": "netfilter"},
-    {"path": "/path/to/existing/normalized.jsonl", "format": "jsonl", "kinds": ["ssh_failed", "connection", "http", "privilege"]}
+    {"path": "/path/to/existing/behavioural-telemetry.jsonl", "format": "jsonl"}
   ],
   "files": [{"path": "/path/to/explicitly-selected/lab-file.txt"}]
 }

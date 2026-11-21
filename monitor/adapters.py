@@ -1,4 +1,8 @@
-"""Read-only normalization for existing auth, web and firewall telemetry."""
+"""Read-only normalization of existing telemetry into the behavioural event schema.
+
+Adapters only describe what a log line says (who, to which service, how much); they
+make no security judgement. Scoring is done by the brain.
+"""
 import json
 import re
 from datetime import datetime
@@ -6,6 +10,7 @@ from urllib.parse import unquote_plus
 from .core import now
 
 AUTH_IDS = ('sshd', 'sshd-session', 'sudo', 'su')
+DEFAULT_KEYS = ('destination_ip', 'destination_port', 'destination_service', 'protocol')
 
 
 def log_time(line):
@@ -20,22 +25,26 @@ def log_time(line):
 
 
 def auth_event(message, ts, source, identity, host=None, identifier=None):
-    failure = re.search(r'(?:Failed (?:password|publickey)|authentication failure).*?(?:from |rhost=)([0-9a-fA-F:.]+)', message, re.I)
+    remote = re.search(r'(?:from |rhost=)([0-9a-fA-F:.]+)', message)
     ssh = identifier in ('sshd', 'sshd-session') or re.search(r'\bsshd(?:-session)?(?:\[|:)', message)
-    # Explicit SSH messages from traditional syslog or known Journal identifiers.
     if (ssh or identifier is None) and re.search(r'Failed (?:password|publickey)', message):
-        kind = 'ssh_failed'
+        kind = 'auth_failure'
+    elif ssh and re.search(r'Accepted (?:password|publickey)', message):
+        kind = 'auth_success'
     elif identifier in ('sudo', 'su') or re.search(r'\b(?:sudo|su)(?:\[|:)', message):
-        kind = 'privilege'
+        kind = 'privilege_command'
     else:
-        kind = 'normal'
+        kind = 'auth_activity'
     port = re.search(r'\bport (\d+)\b', message)
-    return dict(id=identity, ts=ts, kind=kind, ip=failure[1] if failure else None,
-                source_port=int(port[1]) if port else None, dst_host=host,
-                message=message.strip(), source=source)
+    event = dict(id=identity, ts=ts, kind=kind, ip=remote[1] if remote else None,
+                 source_port=int(port[1]) if port else None, dst_host=host,
+                 message=message.strip(), source=source)
+    if ssh:
+        event.update(destination_service='SSH Gateway', protocol='TCP')
+    return event
 
 
-def parse_line(line, fmt, source, identity, destination=None, destination_port=None):
+def parse_line(line, fmt, source, identity, defaults=None):
     if fmt == 'jsonl':
         event = json.loads(line)
         if not isinstance(event, dict):
@@ -45,24 +54,31 @@ def parse_line(line, fmt, source, identity, destination=None, destination_port=N
         event = auth_event(line, log_time(line), source, identity)
     elif fmt == 'http_access':
         # Apache/Nginx common or combined access log (no custom format assumption).
-        match = re.match(r'^(\S+) \S+ \S+ \[([^]]+)\] "([^"\r\n]*)" (\d{3}) (?:\d+|-)(?:\s|$)', line)
+        match = re.match(r'^(\S+) \S+ \S+ \[([^]]+)\] "([^"\r\n]*)" (\d{3}) (\d+|-)(?:\s|$)', line)
         if not match:
             raise ValueError('Expected common/combined HTTP access format')
         stamp = datetime.strptime(match[2], '%d/%b/%Y:%H:%M:%S %z').timestamp()
-        event = dict(ts=stamp, kind='http', ip=match[1], message=unquote_plus(match[3]), source=source, id=identity)
+        event = dict(ts=stamp, kind='http_request', ip=match[1], message=unquote_plus(match[3]), source=source, id=identity,
+                     protocol='TCP', bytes_in=int(match[5]) if match[5] != '-' else None)
     elif fmt == 'netfilter':
         fields = dict(re.findall(r'\b(SRC|DST|SPT|DPT|PROTO)=([^\s]+)', line))
         if not {'SRC', 'DST', 'DPT'} <= fields.keys():
             raise ValueError('Expected netfilter SRC, DST and DPT fields')
         event = dict(ts=log_time(line), kind='connection', ip=fields['SRC'], dst_ip=fields['DST'],
                      port=int(fields['DPT']), source_port=int(fields['SPT']) if 'SPT' in fields else None,
-                     message=line.strip(), source=source, id=identity)
+                     protocol=fields.get('PROTO'), message=line.strip(), source=source, id=identity)
     else:
         raise ValueError('Unsupported source format')
-    if destination is not None:
-        event.setdefault('dst_host', destination)
-    if destination_port is not None:
-        event.setdefault('port', destination_port)
+    for key, value in (defaults or {}).items():
+        if value is None:
+            continue
+        if key == 'destination':
+            event.setdefault('dst_host', value)
+        elif key == 'destination_port':
+            if event.get('port') is None and event.get('destination_port') is None and event.get('dst_port') is None:
+                event['destination_port'] = value
+        elif key in DEFAULT_KEYS:
+            event.setdefault(key, value)
     return event
 
 

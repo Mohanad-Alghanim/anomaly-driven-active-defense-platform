@@ -7,6 +7,12 @@ from .adapters import parse_line
 from .core import now
 
 
+def defaults(source):
+    """Per-source context for adapters that cannot see it in the log line."""
+    keys = ('destination', 'destination_ip', 'destination_port', 'destination_service', 'protocol')
+    return {k: source[k] for k in keys if k in source}
+
+
 def collect_files(engine):
     statuses = []
     for source in engine.c['sources']:
@@ -23,6 +29,7 @@ def collect_files(engine):
             offset = saved.get('offset', 0) if same else 0
             skipping = saved.get('skipping', False) if same else False
             errors = 0
+            batch = []
             with path.open('rb') as handle:
                 handle.seek(offset)
                 for _ in range(engine.c['batch_lines']):
@@ -43,10 +50,12 @@ def collect_files(engine):
                     try:
                         # Source cursor + record content makes crash/restart replay idempotent.
                         identity = hashlib.sha256(f'{path.resolve()}:{stat.st_ino}:{start}:'.encode() + raw).hexdigest()
-                        event = parse_line(raw.decode(), fmt, str(path), identity, source.get('destination'), source.get('destination_port'))
-                        engine.process(event)
+                        event = parse_line(raw.decode(), fmt, str(path), identity, defaults(source))
+                        batch.append(engine.prepare(event))
                     except (ValueError, UnicodeError, TypeError, AttributeError, KeyError):
                         errors += 1
+                # Events are stored and scored before the cursor moves: a crash replays, never skips.
+                engine.ingest(batch)
                 engine.set_state(key, json.dumps(dict(inode=stat.st_ino, offset=handle.tell(), skipping=skipping)))
             status.update(available=True, rejected=errors, status=f'Available; rejected lines this poll: {errors}')
         except (OSError, ValueError) as exc:
@@ -75,7 +84,7 @@ def collect_files(engine):
                 digest = digest.hexdigest()
             old = engine.state(key)
             if old and old != digest:
-                engine.process(dict(ts=now(), kind='file', source=str(path), dst_host=str(path), message=f'Content changed: {path}', authorized=digest == str(entry.get('authorized_sha256', '')).lower()))
+                engine.process(dict(ts=now(), kind='file_change', source=str(path), dst_host=str(path), message=f'Content changed: {path}', authorized=digest == str(entry.get('authorized_sha256', '')).lower()))
             engine.set_state(key, digest)
             status.update(available=True, status='Monitoring content; baseline recorded')
         except (OSError, ValueError) as exc:

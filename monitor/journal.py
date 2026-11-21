@@ -86,23 +86,26 @@ def collect_journal(engine, reader=read_journal):
             records, code, diagnostic = reader(base + ['--since=@' + str(since)], engine.c['batch_lines'])
             recovered = True
         rejected = processed = 0
+        batch, last_cursor = [], None
         for line in records:
             record = None
             try:
                 record = json.loads(line)
                 event = parse_journal(record)
                 if event is not None:
-                    engine.process(event)
-                    processed += 1
+                    batch.append(engine.prepare(event))
             except (ValueError, TypeError, KeyError):
                 rejected += 1
-            # Event commit precedes cursor commit: crashes replay safely, never skip an uncommitted event.
             if isinstance(record, dict) and isinstance(record.get('__CURSOR'), str):
                 try:
                     stamp = int(record['__REALTIME_TIMESTAMP'])/1_000_000
                 except (ValueError, TypeError, KeyError):
                     stamp = saved.get('ts', since)
-                engine.set_state('journal_cursor', json.dumps(dict(cursor=record['__CURSOR'], ts=stamp)))
+                last_cursor = dict(cursor=record['__CURSOR'], ts=stamp)
+        # Event commit precedes cursor commit: crashes replay safely, never skip an uncommitted event.
+        processed = sum(r is not None for r in engine.ingest(batch)) if batch else 0
+        if last_cursor:
+            engine.set_state('journal_cursor', json.dumps(last_cursor))
         status = 'Available (read-only authentication query)'
         if recovered:
             status += '; expired cursor recovered with timestamp overlap'

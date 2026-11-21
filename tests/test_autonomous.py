@@ -1,4 +1,3 @@
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,11 +11,11 @@ import unittest
 from unittest.mock import patch
 
 from monitor.adapters import parse_journal, parse_line
-from monitor.core import Engine, CATEGORIES, config, now
+from monitor.core import Engine, config, now
 from monitor.fixtures import write_fixtures
 from monitor.install import prepare
 from monitor.journal import collect_journal, read_journal
-from monitor.views import collector_health, coverage, snapshot
+from monitor.views import collector_health, employee_table, snapshot
 from monitor.worker import cycle
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,7 +45,7 @@ class AutonomousTests(unittest.TestCase):
     def settings(self):
         return config(ROOT/'config.example.json')
 
-    def test_telemetry_to_six_alerts_and_restart(self):
+    def test_telemetry_scored_attributed_and_restart(self):
         records = write_fixtures(self.root/'fixtures', now()-70)
         settings = self.settings()
         settings['sources'] = [dict(path=str(self.root/'fixtures/access.log.example'), format='http_access', destination='lab', destination_port=8080), dict(path=str(self.root/'fixtures/firewall.log.example'), format='netfilter')]
@@ -57,13 +56,17 @@ class AutonomousTests(unittest.TestCase):
             (self.root/'fixtures/lab-file.txt').write_text('Synthetic unauthorized change\n')
             health = cycle(engine, journal_reader(records))
             self.assertEqual(health['status'], 'RUNNING')
-            self.assertEqual({a['attack'] for a in engine.rows('alerts')}, set(CATEGORIES))
-            self.assertEqual(len(engine.rows('alerts')), 6)
+            self.assertTrue(health['model_version'].startswith('insider_brain:'))
             rows = engine.rows('events')
+            self.assertTrue(all(e['score'] is not None and e['level'] in ('low', 'medium', 'high') for e in rows))
             sudo = [e for e in rows if 'COMMAND=/usr/bin/id' in e['message']]
-            self.assertEqual(sudo[0]['status'], 'NORMAL')
-            connection = next(e for e in rows if e['kind']=='connection')
-            self.assertEqual(connection['dst_ip'], '192.0.2.100')
+            self.assertEqual(sudo[0]['kind'], 'privilege_command')
+            self.assertEqual({e['employee_id'] for e in rows if e['ip'] == '10.200.0.10'}, {'EMP0001'})
+            self.assertEqual({r['employee_id'] for r in employee_table(engine)}, {'EMP0001', 'EMP0002'})
+            self.assertTrue(any(e['kind'] == 'file_change' and e['employee_id'] is None for e in rows))
+            connection = min((e for e in rows if e['kind']=='connection'), key=lambda e: e['ts'])
+            self.assertEqual(connection['dst_service'], 'File Server')
+            self.assertEqual(connection['dst_ip'], '10.10.1.20')
             self.assertTrue(connection['source_port'])
             self.assertTrue(json.loads(engine.state('journal_cursor'))['cursor'].endswith(':6'))
             count = len(rows)
@@ -73,11 +76,11 @@ class AutonomousTests(unittest.TestCase):
         try:
             cycle(engine, journal_reader(records))
             self.assertEqual(len(engine.rows('events')), count)
-            self.assertEqual(len(engine.rows('alerts')), 6)
+            self.assertEqual(sum(r['events'] for r in employee_table(engine)), sum(e['employee_id'] is not None for e in engine.rows('events')))
             with EngineContext(self.db) as reader:
                 view = snapshot(reader, now()-3600)
-                self.assertEqual(view['total_alerts'], 6)
-                self.assertEqual(view['counts'][0], count)
+                self.assertEqual(view['counts']['total'], count)
+                self.assertEqual(view['counts']['scored'], count)
         finally:
             engine.close()
 
@@ -91,7 +94,7 @@ class AutonomousTests(unittest.TestCase):
             result = collect_journal(engine, journal_reader(records, fail_cursor=True))
             self.assertTrue(result['recovered'])
             self.assertEqual(len(engine.rows('events')), count)
-            self.assertEqual(len(engine.rows('alerts')), 2)
+            self.assertTrue(all(e['score'] is not None for e in engine.rows('events')))
         finally:
             engine.close()
 
@@ -103,20 +106,22 @@ class AutonomousTests(unittest.TestCase):
             for _ in range(4):
                 collect_journal(engine, journal_reader(records))
             self.assertEqual(len(engine.rows('events')), 7)
-            self.assertEqual(len(engine.rows('alerts')), 2)
+            self.assertEqual(json.loads(engine.state('journal_cursor'))['cursor'], 'synthetic:auth:6')
         finally:
             engine.close()
 
     def test_journal_parsing_normal_sudo_su_and_ssh(self):
         records = write_fixtures(self.root/'fixtures')
-        self.assertEqual(parse_journal(records[0])['kind'], 'ssh_failed')
-        self.assertEqual(parse_journal(records[5])['kind'], 'privilege')
+        self.assertEqual(parse_journal(records[0])['kind'], 'auth_failure')
+        self.assertEqual(parse_journal(records[0])['destination_service'], 'SSH Gateway')
+        self.assertEqual(parse_journal(records[5])['kind'], 'privilege_command')
         self.assertEqual(parse_journal(records[5])['dst_host'], 'isolated-lab')
         su = records[5] | dict(SYSLOG_IDENTIFIER='su', MESSAGE='pam_unix(su:session): session opened for user root')
         engine = Engine(self.db)
         try:
-            self.assertEqual(engine.process(parse_journal(su)), [])
-            self.assertEqual(engine.process(parse_journal(records[5])), [])
+            self.assertIn(engine.process(parse_journal(su))['level'], ('low', 'medium', 'high'))
+            self.assertIsNone(engine.process(parse_journal(records[5])))  # same Journal cursor: deduplicated
+            self.assertIn(engine.process(parse_journal(records[6]))['level'], ('low', 'medium', 'high'))
         finally:
             engine.close()
         with self.assertRaises(ValueError):
@@ -140,25 +145,25 @@ class AutonomousTests(unittest.TestCase):
         self.assertEqual(code, 0)
 
     def test_access_and_netfilter_parsers(self):
-        web = '192.0.2.2 - - [07/Nov/2026:12:00:00 +0000] "GET /?q=%27%20OR%201=1 HTTP/1.1" 200 -\n'
-        result = parse_line(web, 'http_access', 'web', 'id', 'lab', 8080)
-        self.assertIn("' OR 1=1", result['message'])
-        self.assertEqual(result['port'], 8080)
+        web = '192.0.2.2 - - [07/Nov/2026:12:00:00 +0000] "GET /report%20q3 HTTP/1.1" 200 512\n'
+        result = parse_line(web, 'http_access', 'web', 'id', dict(destination='lab', destination_port=8080, destination_service='Internal Web'))
+        self.assertIn('/report q3', result['message'])
+        self.assertEqual(result['destination_port'], 8080)
+        self.assertEqual(result['destination_service'], 'Internal Web')
+        self.assertEqual(result['bytes_in'], 512)
         event = parse_line('2026-11-07T12:00:00Z kernel: SRC=192.0.2.1 DST=192.0.2.2 SPT=40000 DPT=22 PROTO=TCP', 'netfilter','fw','x')
         self.assertEqual(event['dst_ip'],'192.0.2.2')
         self.assertEqual(event['source_port'],40000)
 
-    def test_health_coverage_stale_and_missing_sources(self):
+    def test_health_stale_and_missing_sources(self):
         settings = self.settings()
         settings['sources'] = [dict(path=str(self.root/'missing'), format='http_access')]
         engine = Engine(self.db, settings)
         try:
             health = cycle(engine, journal_reader([]))
             self.assertEqual(health['status'],'DEGRADED')
-            rows = coverage(settings, health['sources'])
-            self.assertIn('Not configured', rows[1]['telemetry_status'])
-            self.assertIn('unavailable', rows[2]['telemetry_status'])
-            self.assertIn('coverage unverified', rows[0]['telemetry_status'])
+            missing = next(s for s in health['sources'] if s['source'] == str(self.root/'missing'))
+            self.assertFalse(missing['available'])
             engine.set_state('collector_health', json.dumps(dict(status='RUNNING', heartbeat=1, sources=[])))
             self.assertEqual(collector_health(engine)['status'], 'STALE / STOPPED')
         finally:
@@ -168,12 +173,16 @@ class AutonomousTests(unittest.TestCase):
         old = sqlite3.connect(self.db)
         old.execute('CREATE TABLE events(id TEXT PRIMARY KEY, ts REAL, source TEXT, kind TEXT, ip TEXT, port INTEGER, message TEXT, authorized INTEGER, status TEXT)')
         old.execute("INSERT INTO events VALUES('old',1,'source','normal',NULL,NULL,'retained',0,'NORMAL')")
+        old.execute('CREATE TABLE alerts(id INTEGER PRIMARY KEY, attack TEXT)')
+        old.execute("INSERT INTO alerts(attack) VALUES('historical rule alert')")
         old.commit(); old.close()
         engine = Engine(self.db)
         try:
             self.assertEqual(engine.rows('events')[0]['message'], 'retained')
             engine.process(dict(ts=2,kind='normal',message='new',dst_host='lab'))
             self.assertEqual(len(engine.rows('events')),2)
+            self.assertEqual(engine.db.execute('SELECT attack FROM alerts').fetchone()[0], 'historical rule alert')
+            self.assertEqual(engine.db.execute('PRAGMA user_version').fetchone()[0], 3)
         finally:
             engine.close()
 
@@ -257,14 +266,16 @@ class AutonomousTests(unittest.TestCase):
         engine=Engine(self.db,self.settings())
         try:
             cycle(engine,journal_reader([]))
-            engine.process(dict(ts=now(),kind='http',ip='192.0.2.1',dst_ip='192.0.2.2',port=8080,message="GET /?q=' OR 1=1"))
+            engine.process(dict(ts=now(),kind='http_request',ip='10.200.0.10',dst_ip='10.20.1.10',port=443,bytes_in=900,bytes_out=400,message='GET /report'))
         finally: engine.close()
         with patch.dict(os.environ,{'SIX_DATA':str(self.root),'SIX_CONFIG':str(ROOT/'config.example.json')}), patch('monitor.collectors.collect_files',side_effect=AssertionError('Dashboard must not collect')):
             app=AppTest.from_file(str(ROOT/'app.py')).run(timeout=20)
             self.assertFalse(app.exception)
-            self.assertEqual([m.value for m in app.metric],['1','0','1','1'])
+            self.assertEqual(app.metric[0].value,'1')
+            self.assertEqual(app.metric[3].value,'1')
             self.assertTrue(any('RUNNING' in message.value for message in app.success))
-            self.assertIn('192.0.2.2',app.json[0].value)
+            self.assertTrue(any('AI analysis — EMP0001' in header.value for header in app.subheader))
+            self.assertTrue(any('Internal Web' in str(frame.value.to_dict()) for frame in app.dataframe))
 
     def test_single_collector_lock(self):
         import fcntl
