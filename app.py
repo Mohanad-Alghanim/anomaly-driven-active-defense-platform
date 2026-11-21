@@ -9,7 +9,6 @@ from monitor.core import Engine, CATEGORIES, config, now
 from monitor.demo import events
 from monitor.views import collector_health, coverage, snapshot
 from monitor.lab_readiness import readiness
-from monitor.ai_engine import analyze_alert
 
 st.set_page_config(page_title='Anomaly-Driven Active Defense Platform', layout='wide')
 st.markdown('''<style>
@@ -117,109 +116,6 @@ def dashboard():
             st.dataframe(frame[['attack', 'event_at_utc', 'detected_at_utc', 'ip', 'source_port', 'dst_ip', 'dst_host', 'dst_port', 'status', 'severity', 'rule', 'description', 'action']], width='stretch', hide_index=True)
         else:
             st.caption('No alerts.')
-
-        st.divider()
-        st.subheader('AI Security Analyst')
-        st.caption('AI analysis is advisory. Original detection rules remain authoritative.')
-
-        if alerts:
-            alert_lookup = {a['id']: a for a in alerts}
-            selected_alert_id = st.selectbox(
-                'Select alert',
-                list(alert_lookup),
-                format_func=lambda alert_id: (
-                    f"{alert_lookup[alert_id]['attack']} | "
-                    f"{alert_lookup[alert_id]['severity']} | #{alert_id}"
-                ),
-                key='ai_selected_alert',
-            )
-
-            if st.button('Analyze Alert', key='run_ai_analysis'):
-                try:
-                    report = analyze_alert(engine, alert_lookup[selected_alert_id])
-                    st.session_state['ai_analysis_report'] = report
-                    st.session_state['ai_analysis_alert_id'] = selected_alert_id
-                except Exception as exc:
-                    st.session_state.pop('ai_analysis_report', None)
-                    st.session_state.pop('ai_analysis_alert_id', None)
-                    st.error(f'AI analysis failed: {exc}')
-
-            report = st.session_state.get('ai_analysis_report')
-            report_id = st.session_state.get('ai_analysis_alert_id')
-
-            if report and report_id == selected_alert_id:
-                st.write('**Model status:**', report['model_status'])
-                col1, col2 = st.columns(2)
-                col1.metric('Original Detection', report['attack'])
-                col2.metric('AI Prediction', report['model_prediction'] or 'Not available')
-
-                agreement = report.get('classification_agreement')
-                st.write(
-                    '**Classification agreement:**',
-                    'Yes' if agreement is True else
-                    'No' if agreement is False else 'Not evaluated'
-                )
-
-                st.markdown('**Behavioral Features**')
-                network_not_applicable = any(
-                    item.get('feature_group') == 'network_behavior'
-                    and item.get('value') == 'not_applicable'
-                    for item in report['evidence']
-                )
-                network_features = {
-                    'failed_auth_count_60s',
-                    'distinct_ports_60s',
-                    'requests_10s',
-                }
-                st.dataframe(
-                    pd.DataFrame([
-                        {
-                            'Feature': name,
-                            'Observed value': (
-                                'N/A' if network_not_applicable and name in network_features
-                                else value
-                            ),
-                        }
-                        for name, value in report['features'].items()
-                    ]),
-                    hide_index=True,
-                    width='stretch',
-                )
-
-                st.markdown('**Evidence**')
-                evidence_rows = [
-                    {
-                        'Evidence': item.get('feature') or item.get('feature_group') or 'Evidence',
-                        'Value': item.get('value', 'N/A'),
-                        'Details': item.get('source') or item.get('reason') or '',
-                    }
-                    for item in report['evidence']
-                ]
-                st.dataframe(
-                    pd.DataFrame(evidence_rows),
-                    hide_index=True,
-                    width='stretch',
-                )
-
-                explanation = report.get('incident_explanation', {})
-                if explanation:
-                    st.markdown('### AI Incident Explanation')
-                    st.info(explanation.get('what_happened', 'Not available.'))
-
-                    st.markdown('**Why Was It Flagged?**')
-                    st.write(explanation.get('why_flagged', 'Not available.'))
-
-                    st.markdown('**Recommended Response**')
-                    st.write(explanation.get('recommended_response', 'Not available.'))
-
-                    st.caption(
-                        'Severity: ' + str(explanation.get('severity', 'Unspecified'))
-                    )
-
-                for limitation in report['limitations']:
-                    st.caption('Limitation: ' + limitation)
-        else:
-            st.info('No alerts available for AI analysis.')
 
         st.subheader('Event Details')
         if ev:

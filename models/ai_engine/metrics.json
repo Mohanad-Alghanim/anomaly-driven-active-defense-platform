@@ -1,210 +1,501 @@
 {
-  "dataset": "Anomaly_Defense_Team_Dataset_AI_READY.xlsx",
+  "generated_at_utc": "2026-11-21T11:48:52+00:00",
+  "dataset": "Behavioral_Intelligence_Dataset_INTERNAL_ATTACKS_6_CLEANED.xlsx",
   "dataset_type": "synthetic_only",
-  "records": 2158,
-  "sessions": 171,
-  "features": [
-    "failed_auth_count_60s",
-    "distinct_ports_60s",
-    "requests_10s",
-    "sql_pattern_match",
-    "file_hash_changed",
-    "capability_denied"
-  ],
-  "model": "DecisionTreeClassifier",
+  "model": "IsolationForest (unsupervised, trained on normal behaviour only)",
   "model_config": {
-    "max_depth": 6,
-    "min_samples_leaf": 2,
-    "class_weight": "balanced",
-    "random_state": 42
+    "n_estimators": 300,
+    "random_state": 42,
+    "max_samples": "auto",
+    "scoring": "-score_samples (higher = more anomalous)",
+    "sklearn": "1.9.1"
   },
-  "validation": "4-fold StratifiedGroupKFold by session_id",
-  "out_of_fold_accuracy": 1.0,
-  "out_of_fold_macro_f1": 1.0,
-  "folds": [
-    {
-      "fold": 1,
-      "train_records": 1618,
-      "test_records": 540,
-      "train_sessions": 129,
-      "test_sessions": 42,
-      "accuracy": 1.0,
-      "macro_f1": 1.0
-    },
-    {
-      "fold": 2,
-      "train_records": 1618,
-      "test_records": 540,
-      "train_sessions": 126,
-      "test_sessions": 45,
-      "accuracy": 1.0,
-      "macro_f1": 1.0
-    },
-    {
-      "fold": 3,
-      "train_records": 1619,
-      "test_records": 539,
-      "train_sessions": 129,
-      "test_sessions": 42,
-      "accuracy": 1.0,
-      "macro_f1": 1.0
-    },
-    {
-      "fold": 4,
-      "train_records": 1619,
-      "test_records": 539,
-      "train_sessions": 129,
-      "test_sessions": 42,
-      "accuracy": 1.0,
-      "macro_f1": 1.0
-    }
+  "features": [
+    "hour_sin",
+    "hour_cos",
+    "day_of_week_sin",
+    "day_of_week_cos",
+    "is_weekend_observed",
+    "within_assumed_work_hours",
+    "bytes_in_log1p",
+    "bytes_out_log1p",
+    "response_time_ms_log1p",
+    "source_events_previous_hour",
+    "emp_bytes_in_z",
+    "emp_bytes_out_z",
+    "emp_response_time_z",
+    "emp_hour_deviation",
+    "emp_service_rarity",
+    "emp_activity_z",
+    "protocol",
+    "destination_service",
+    "destination_port"
   ],
-  "classification_report": {
-    "DoS Indicator": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 400.0
+  "protocol": {
+    "training": "Normal_Behavior_Learning, earliest 70% by time (42000 events, before 2026-10-22T07:44:26+00:00)",
+    "calibration": "Normal_Behavior_Learning, next 15% (9000 events); level boundaries are quantiles of these scores",
+    "evaluation": "Remaining normal events from 2026-11-04T11:10:57+00:00 (9000) and all 2,168 attack events; labels from Ground_Truth_Evaluation used only here",
+    "entity_attribution": "source_ip -> Device_Profiles -> employee_id (as a live collector would); identifiers never enter the model matrix",
+    "personal_baselines": "recomputed from the training window only; the workbook Employee_Behavior_Baselines cover all 60,000 normal events and would leak held-out normal statistics"
+  },
+  "level_policy": {
+    "medium_false_positive_budget": 0.05,
+    "high_false_positive_budget": 0.01,
+    "event_score_boundaries": {
+      "medium": 0.5307709103359147,
+      "high": 0.5605416575794023
     },
-    "Port Scanning": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 120.0
+    "employee_day_risk_boundaries": {
+      "medium": 1.9181635758079296,
+      "high": 2.9825048846280424
+    }
+  },
+  "all_attacks_vs_heldout_normals": {
+    "events": 11168,
+    "attacks": 2168,
+    "normals": 9000,
+    "auroc": 0.9972498462484624,
+    "auprc": 0.991362653483974,
+    "attack_prevalence": 0.19412607449856734,
+    "high_level": {
+      "score_boundary": 0.5605416575794023,
+      "recall": 0.9672509225092251,
+      "realized_false_positive_rate": 0.011555555555555555,
+      "precision": 0.9527487505679236
+    },
+    "medium_level": {
+      "score_boundary": 0.5307709103359147,
+      "recall": 0.9893911439114391,
+      "realized_false_positive_rate": 0.04855555555555555,
+      "precision": 0.8307513555383423
+    },
+    "confidence_95": {
+      "auroc": [
+        0.9958201703895527,
+        0.99837548657576
+      ],
+      "auprc": [
+        0.9877728369841422,
+        0.9944716799656936
+      ],
+      "recall_at_high_level": [
+        0.9547917652626597,
+        0.9794169858971857
+      ]
+    }
+  },
+  "chronological_test_window": {
+    "events": 9515,
+    "attacks": 515,
+    "normals": 9000,
+    "auroc": 0.9972073354908305,
+    "auprc": 0.9739098142831135,
+    "attack_prevalence": 0.054125065685759324,
+    "high_level": {
+      "score_boundary": 0.5605416575794023,
+      "recall": 0.9650485436893204,
+      "realized_false_positive_rate": 0.011555555555555555,
+      "precision": 0.826955074875208
+    },
+    "medium_level": {
+      "score_boundary": 0.5307709103359147,
+      "recall": 0.9883495145631068,
+      "realized_false_positive_rate": 0.04855555555555555,
+      "precision": 0.5380549682875264
+    }
+  },
+  "per_attack_category": {
+    "Credential Misuse": {
+      "events": 361,
+      "sessions": 19,
+      "auroc_vs_normal": 0.9943798091720529,
+      "auprc_vs_normal": 0.9404413746861615,
+      "recall_at_high_level": 0.9418282548476454,
+      "recall_at_medium_level": 0.9778393351800554,
+      "sessions_with_any_high_event": 19
+    },
+    "Data Exfiltration": {
+      "events": 362,
+      "sessions": 19,
+      "auroc_vs_normal": 0.9992387968078577,
+      "auprc_vs_normal": 0.9890528837150423,
+      "recall_at_high_level": 0.9861878453038674,
+      "recall_at_medium_level": 0.9972375690607734,
+      "sessions_with_any_high_event": 19
+    },
+    "Data Snooping": {
+      "events": 361,
+      "sessions": 19,
+      "auroc_vs_normal": 0.9994776854416743,
+      "auprc_vs_normal": 0.9923281407544768,
+      "recall_at_high_level": 0.9916897506925207,
+      "recall_at_medium_level": 0.997229916897507,
+      "sessions_with_any_high_event": 19
+    },
+    "Privilege Escalation": {
+      "events": 362,
+      "sessions": 19,
+      "auroc_vs_normal": 0.9960926949048495,
+      "auprc_vs_normal": 0.9496167570295699,
+      "recall_at_high_level": 0.9585635359116023,
+      "recall_at_medium_level": 0.988950276243094,
+      "sessions_with_any_high_event": 19
     },
     "SQL Injection": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 8.0
+      "events": 361,
+      "sessions": 19,
+      "auroc_vs_normal": 0.9977571560480147,
+      "auprc_vs_normal": 0.9722572407237138,
+      "recall_at_high_level": 0.96398891966759,
+      "recall_at_medium_level": 0.9889196675900277,
+      "sessions_with_any_high_event": 19
     },
-    "SSH Brute Force": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 40.0
-    },
-    "Suspicious Privilege Escalation": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 8.0
-    },
-    "Unauthorized File Modification": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 8.0
-    },
-    "none": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 1574.0
-    },
-    "accuracy": 1.0,
-    "macro avg": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 2158.0
-    },
-    "weighted avg": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 2158.0
+    "Sabotage / Log Tampering": {
+      "events": 361,
+      "sessions": 19,
+      "auroc_vs_normal": 0.9965506309633733,
+      "auprc_vs_normal": 0.9597374741139464,
+      "recall_at_high_level": 0.961218836565097,
+      "recall_at_medium_level": 0.9861495844875346,
+      "sessions_with_any_high_event": 19
     }
   },
-  "confusion_matrix": [
-    [
-      400,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    [
-      0,
-      120,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    [
-      0,
-      0,
-      8,
-      0,
-      0,
-      0,
-      0
-    ],
-    [
-      0,
-      0,
-      0,
-      40,
-      0,
-      0,
-      0
-    ],
-    [
-      0,
-      0,
-      0,
-      0,
-      8,
-      0,
-      0
-    ],
-    [
-      0,
-      0,
-      0,
-      0,
-      0,
-      8,
-      0
-    ],
-    [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      1574
+  "feature_audit": {
+    "univariate": {
+      "hour_sin": {
+        "univariate_auroc": 0.5550550430504304
+      },
+      "hour_cos": {
+        "univariate_auroc": 0.6425616543665437
+      },
+      "day_of_week_sin": {
+        "univariate_auroc": 0.641052352398524
+      },
+      "day_of_week_cos": {
+        "univariate_auroc": 0.6993668767937679
+      },
+      "is_weekend_observed": {
+        "univariate_auroc": 0.5419444444444445
+      },
+      "within_assumed_work_hours": {
+        "univariate_auroc": 0.7145891758917589
+      },
+      "bytes_in_log1p": {
+        "univariate_auroc": 0.9753684911849119
+      },
+      "bytes_out_log1p": {
+        "univariate_auroc": 0.9047897447724478
+      },
+      "response_time_ms_log1p": {
+        "univariate_auroc": 0.9694078515785156
+      },
+      "source_events_previous_hour": {
+        "univariate_auroc": 0.9854030340303404
+      },
+      "emp_bytes_in_z": {
+        "univariate_auroc": 0.9750147088970889
+      },
+      "emp_bytes_out_z": {
+        "univariate_auroc": 0.9015046125461255
+      },
+      "emp_response_time_z": {
+        "univariate_auroc": 0.9692901291512914
+      },
+      "emp_hour_deviation": {
+        "univariate_auroc": 0.7657063858138581
+      },
+      "emp_service_rarity": {
+        "univariate_auroc": 0.6213284645346453
+      },
+      "emp_activity_z": {
+        "univariate_auroc": 0.9866056016810169
+      },
+      "protocol": {
+        "univariate_auroc": 0.5682222222222222,
+        "attack_share_unseen_in_normal_training": 0.0,
+        "normal_share_unseen_in_normal_training": 0.0
+      },
+      "destination_service": {
+        "univariate_auroc": 0.5561762761377613,
+        "attack_share_unseen_in_normal_training": 0.0,
+        "normal_share_unseen_in_normal_training": 0.0
+      },
+      "destination_port": {
+        "univariate_auroc": 0.8630193470684706,
+        "attack_share_unseen_in_normal_training": 0.5276752767527675,
+        "normal_share_unseen_in_normal_training": 0.0
+      }
+    },
+    "near_separating_features": [
+      "emp_activity_z",
+      "source_events_previous_hour",
+      "bytes_in_log1p",
+      "emp_bytes_in_z",
+      "response_time_ms_log1p",
+      "emp_response_time_z"
     ]
-  ],
-  "class_order": [
-    "DoS Indicator",
-    "Port Scanning",
-    "SQL Injection",
-    "SSH Brute Force",
-    "Suspicious Privilege Escalation",
-    "Unauthorized File Modification",
-    "none"
-  ],
-  "feature_importance": {
-    "failed_auth_count_60s": 0.1666666666666581,
-    "distinct_ports_60s": 0.1666666666666629,
-    "requests_10s": 0.1666666666666799,
-    "sql_pattern_match": 0.16666666666667504,
-    "file_hash_changed": 0.16666666666665972,
-    "capability_denied": 0.1666666666666644
   },
-  "tree_depth": 6,
-  "tree_leaves": 7,
-  "decision_rules": "|--- distinct_ports_60s <= 8.000\n|   |--- failed_auth_count_60s <= 2.500\n|   |   |--- capability_denied <= 0.500\n|   |   |   |--- sql_pattern_match <= 0.500\n|   |   |   |   |--- requests_10s <= 25.500\n|   |   |   |   |   |--- file_hash_changed <= 0.500\n|   |   |   |   |   |   |--- class: none\n|   |   |   |   |   |--- file_hash_changed >  0.500\n|   |   |   |   |   |   |--- class: Unauthorized File Modification\n|   |   |   |   |--- requests_10s >  25.500\n|   |   |   |   |   |--- class: DoS Indicator\n|   |   |   |--- sql_pattern_match >  0.500\n|   |   |   |   |--- class: SQL Injection\n|   |   |--- capability_denied >  0.500\n|   |   |   |--- class: Suspicious Privilege Escalation\n|   |--- failed_auth_count_60s >  2.500\n|   |   |--- class: SSH Brute Force\n|--- distinct_ports_60s >  8.000\n|   |--- class: Port Scanning\n",
+  "employee_day": {
+    "events": 5986,
+    "attacks": 13,
+    "normals": 5973,
+    "auroc": 1.0,
+    "auprc": 1.0,
+    "attack_prevalence": 0.002171734046107584,
+    "high_level": {
+      "score_boundary": 2.9825048846280424,
+      "recall": 1.0,
+      "realized_false_positive_rate": 0.011217143813828897,
+      "precision": 0.1625
+    },
+    "medium_level": {
+      "score_boundary": 1.9181635758079296,
+      "recall": 1.0,
+      "realized_false_positive_rate": 0.05658797923991294,
+      "precision": 0.037037037037037035
+    },
+    "unit": "employee-day"
+  },
+  "employee_ranking_heldout_window": {
+    "employees_ranked": 1000,
+    "employees_with_attacks_in_window": 13,
+    "their_ranks": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13
+    ],
+    "employees_at_high_level": 76
+  },
+  "top_event_explanations": [
+    {
+      "employee_id": "EMP0318",
+      "score": 0.6419351445752461,
+      "level": "high",
+      "reasons": [
+        "destination_port=8088 never seen in normal behaviour",
+        "emp_activity_z +619.3 sd from normal",
+        "source_events_previous_hour +214.5 sd from normal"
+      ]
+    },
+    {
+      "employee_id": "EMP0318",
+      "score": 0.6417903860548043,
+      "level": "high",
+      "reasons": [
+        "destination_port=8088 never seen in normal behaviour",
+        "emp_activity_z +453.4 sd from normal",
+        "source_events_previous_hour +157.0 sd from normal"
+      ]
+    },
+    {
+      "employee_id": "EMP0318",
+      "score": 0.6417903860548043,
+      "level": "high",
+      "reasons": [
+        "destination_port=8088 never seen in normal behaviour",
+        "emp_activity_z +464.5 sd from normal",
+        "source_events_previous_hour +160.8 sd from normal"
+      ]
+    },
+    {
+      "employee_id": "EMP0318",
+      "score": 0.6417903860548043,
+      "level": "high",
+      "reasons": [
+        "destination_port=8088 never seen in normal behaviour",
+        "emp_activity_z +486.6 sd from normal",
+        "source_events_previous_hour +168.5 sd from normal"
+      ]
+    },
+    {
+      "employee_id": "EMP0318",
+      "score": 0.6417903860548043,
+      "level": "high",
+      "reasons": [
+        "destination_port=8088 never seen in normal behaviour",
+        "emp_activity_z +530.8 sd from normal",
+        "source_events_previous_hour +183.8 sd from normal"
+      ]
+    }
+  ],
+  "ablations": {
+    "base_13_features": {
+      "features": [
+        "hour_sin",
+        "hour_cos",
+        "day_of_week_sin",
+        "day_of_week_cos",
+        "is_weekend_observed",
+        "within_assumed_work_hours",
+        "bytes_in_log1p",
+        "bytes_out_log1p",
+        "response_time_ms_log1p",
+        "source_events_previous_hour",
+        "protocol",
+        "destination_service",
+        "destination_port"
+      ],
+      "auroc": 0.9782704489544896,
+      "auprc": 0.9061115669527835,
+      "recall_at_1pct_fpr": 0.5382841328413284,
+      "per_category_recall_at_1pct_fpr": {
+        "Credential Misuse": 0.3850415512465374,
+        "Data Exfiltration": 0.5662983425414365,
+        "Data Snooping": 0.6925207756232687,
+        "Privilege Escalation": 0.494475138121547,
+        "SQL Injection": 0.6454293628808865,
+        "Sabotage / Log Tampering": 0.44598337950138506
+      },
+      "per_category_auroc": {
+        "Credential Misuse": 0.9606035703293322,
+        "Data Exfiltration": 0.9907648864333949,
+        "Data Snooping": 0.9924783010156972,
+        "Privilege Escalation": 0.970341620626151,
+        "SQL Injection": 0.9841089566020313,
+        "Sabotage / Log Tampering": 0.9713127116035704
+      }
+    },
+    "base_13_without_destination_port": {
+      "features": [
+        "hour_sin",
+        "hour_cos",
+        "day_of_week_sin",
+        "day_of_week_cos",
+        "is_weekend_observed",
+        "within_assumed_work_hours",
+        "bytes_in_log1p",
+        "bytes_out_log1p",
+        "response_time_ms_log1p",
+        "source_events_previous_hour",
+        "protocol",
+        "destination_service"
+      ],
+      "auroc": 0.9851818368183682,
+      "auprc": 0.928292633420044,
+      "recall_at_1pct_fpr": 0.49538745387453875,
+      "per_category_recall_at_1pct_fpr": {
+        "Credential Misuse": 0.5595567867036011,
+        "Data Exfiltration": 0.43646408839779005,
+        "Data Snooping": 0.46814404432132967,
+        "Privilege Escalation": 0.5165745856353591,
+        "SQL Injection": 0.5263157894736842,
+        "Sabotage / Log Tampering": 0.46537396121883656
+      },
+      "per_category_auroc": {
+        "Credential Misuse": 0.9863416435826409,
+        "Data Exfiltration": 0.9827265193370166,
+        "Data Snooping": 0.9864610649430593,
+        "Privilege Escalation": 0.9868388581952119,
+        "SQL Injection": 0.9853345644813789,
+        "Sabotage / Log Tampering": 0.9833905817174515
+      }
+    },
+    "personal_without_destination_port": {
+      "features": [
+        "hour_sin",
+        "hour_cos",
+        "day_of_week_sin",
+        "day_of_week_cos",
+        "is_weekend_observed",
+        "within_assumed_work_hours",
+        "bytes_in_log1p",
+        "bytes_out_log1p",
+        "response_time_ms_log1p",
+        "source_events_previous_hour",
+        "emp_bytes_in_z",
+        "emp_bytes_out_z",
+        "emp_response_time_z",
+        "emp_hour_deviation",
+        "emp_service_rarity",
+        "emp_activity_z",
+        "protocol",
+        "destination_service"
+      ],
+      "auroc": 0.9982589175891758,
+      "auprc": 0.9947667438088319,
+      "recall_at_1pct_fpr": 0.9769372693726938,
+      "per_category_recall_at_1pct_fpr": {
+        "Credential Misuse": 0.9695290858725761,
+        "Data Exfiltration": 0.9779005524861878,
+        "Data Snooping": 0.9889196675900277,
+        "Privilege Escalation": 0.9834254143646409,
+        "SQL Injection": 0.9667590027700831,
+        "Sabotage / Log Tampering": 0.9750692520775623
+      },
+      "per_category_auroc": {
+        "Credential Misuse": 0.9978113265620192,
+        "Data Exfiltration": 0.9989260282381829,
+        "Data Snooping": 0.9994422899353648,
+        "Privilege Escalation": 0.9986516267648864,
+        "SQL Injection": 0.9968202523853493,
+        "Sabotage / Log Tampering": 0.9978990458602647
+      }
+    },
+    "personal_without_port_and_burst_volume": {
+      "features": [
+        "hour_sin",
+        "hour_cos",
+        "day_of_week_sin",
+        "day_of_week_cos",
+        "is_weekend_observed",
+        "within_assumed_work_hours",
+        "bytes_in_log1p",
+        "bytes_out_log1p",
+        "response_time_ms_log1p",
+        "emp_bytes_in_z",
+        "emp_bytes_out_z",
+        "emp_response_time_z",
+        "emp_hour_deviation",
+        "emp_service_rarity",
+        "protocol",
+        "destination_service"
+      ],
+      "auroc": 0.9736378126281263,
+      "auprc": 0.8833397842567499,
+      "recall_at_1pct_fpr": 0.45571955719557194,
+      "per_category_recall_at_1pct_fpr": {
+        "Credential Misuse": 0.4265927977839335,
+        "Data Exfiltration": 0.39779005524861877,
+        "Data Snooping": 0.4404432132963989,
+        "Privilege Escalation": 0.494475138121547,
+        "SQL Injection": 0.48753462603878117,
+        "Sabotage / Log Tampering": 0.48753462603878117
+      },
+      "per_category_auroc": {
+        "Credential Misuse": 0.9722933210218528,
+        "Data Exfiltration": 0.9772400245549417,
+        "Data Snooping": 0.9761120344721452,
+        "Privilege Escalation": 0.9751860036832413,
+        "SQL Injection": 0.9676595875654047,
+        "Sabotage / Log Tampering": 0.9733216374269006
+      }
+    }
+  },
+  "leakage_alert": null,
+  "perfect_score_alerts": [
+    {
+      "metric": "employee_day.auroc",
+      "value": 1.0,
+      "identifier_or_label_in_matrix": false,
+      "event_count_only_auroc": 1.0,
+      "normal_day_max_events": 7,
+      "attack_day_min_events": 8,
+      "diagnosis": "Not a leak: no identifier/label reaches the model, but the number of events per employee-day alone separates the classes perfectly. Attack scenarios are generated as dense bursts while each employee has only 60 normal events in ~90 days. Employee-day separation therefore reflects the dataset generator, not detection skill."
+    }
+  ],
   "limitations": [
-    "Training and validation data are synthetic.",
-    "Perfect synthetic validation does not establish real-world detection accuracy.",
-    "Rare attack classes have only eight independent sessions each.",
-    "The model is an advisory classifier, not proof of an attack."
+    "Training and evaluation data are synthetic; no real-world detection claim is made.",
+    "Anomaly means deviation from learned normal behaviour; it is not proof of malicious intent.",
+    "Feature design was fixed before evaluation; the ablations show sensitivity to dataset generation artifacts."
   ]
 }
