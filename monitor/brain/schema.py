@@ -6,15 +6,28 @@ before fitting or scoring.
 """
 import re
 
-# Exactly the 13 columns of the dataset's Model_Features / Normal_Behavior_Learning sheets.
+# The 13 columns of the dataset's Model_Features / Normal_Behavior_Learning sheets.
+DATASET_FEATURES = (
+    'hour_sin', 'hour_cos', 'day_of_week_sin', 'day_of_week_cos',
+    'is_weekend_observed', 'within_assumed_work_hours',
+    'bytes_in_log1p', 'bytes_out_log1p', 'response_time_ms_log1p',
+    'destination_port', 'protocol', 'destination_service', 'source_events_previous_hour',
+)
+
+# Model inputs: the dataset columns minus destination_port.
+# Decision (frozen before the final training run): in the normal data the port is
+# random with respect to the service, which is a generation artifact with no
+# behavioural meaning and is not how real services behave. It is kept as context
+# in storage and the UI, never as a model input.
+EXCLUDED_DATASET_FEATURES = ('destination_port',)
+
 BASE_NUMERIC = (
     'hour_sin', 'hour_cos', 'day_of_week_sin', 'day_of_week_cos',
     'is_weekend_observed', 'within_assumed_work_hours',
     'bytes_in_log1p', 'bytes_out_log1p', 'response_time_ms_log1p',
     'source_events_previous_hour',
 )
-# destination_port is a service code, not a quantity, so it is one-hot encoded.
-BASE_CATEGORICAL = ('protocol', 'destination_service', 'destination_port')
+BASE_CATEGORICAL = ('protocol', 'destination_service')
 BASE_FEATURES = BASE_NUMERIC + BASE_CATEGORICAL
 
 # Deviation of an event from its own employee's normal baseline.

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .schema import BASE_FEATURES
+from .schema import DATASET_FEATURES as BASE_FEATURES
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATASET = ROOT / 'data' / 'Behavioral_Intelligence_Dataset_INTERNAL_ATTACKS_6_CLEANED.xlsx'

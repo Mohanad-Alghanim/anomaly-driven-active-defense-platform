@@ -17,6 +17,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from .features import PersonalBaseline
+from .risk import rolling_risk
 from .schema import BASE_CATEGORICAL, BASE_NUMERIC, PERSONAL_FEATURES, assert_no_leakage
 
 LEVELS = ('low', 'medium', 'high')
@@ -45,6 +46,9 @@ class InsiderThreatBrain:
     exclude: tuple = ()                     # feature names to drop (used for ablation studies)
     n_estimators: int = 300
     random_state: int = 42
+    # Rolling employee risk half-life: how quickly past events fade. An aggregation
+    # time constant, not a detection threshold; levels come from calibration.
+    risk_half_life_hours: float = 24.0
     policy: LevelPolicy = field(default_factory=LevelPolicy)
 
     # ------------------------------------------------------------------ features
@@ -98,21 +102,24 @@ class InsiderThreatBrain:
 
     # ------------------------------------------------------------------ calibration
     def calibrate(self, normal_holdout):
-        """Derive level boundaries and evidence scale from independent normal events."""
+        """Derive event and employee level boundaries from independent normal events."""
         raw = self.score_events(normal_holdout)
-        scores = np.sort(raw)
-        self.calibration_scores_ = scores
-        self.boundaries_ = {
-            'medium': float(np.quantile(scores, 1 - self.policy.medium_fpr)),
-            'high': float(np.quantile(scores, 1 - self.policy.high_fpr)),
-        }
-        daily = self._daily(normal_holdout.assign(score=raw))
-        self.employee_calibration_ = np.sort(daily['risk'].to_numpy())
-        self.employee_boundaries_ = {
-            'medium': float(np.quantile(self.employee_calibration_, 1 - self.policy.medium_fpr)),
-            'high': float(np.quantile(self.employee_calibration_, 1 - self.policy.high_fpr)),
-        }
+        self.calibration_scores_ = np.sort(raw)
+        self.boundaries_ = self._boundaries(self.calibration_scores_)
+        # Employee boundaries: the same rolling aggregation, replayed over normal
+        # employees, gives the distribution of normal employee risk.
+        risk = rolling_risk(normal_holdout.assign(score=raw), self.half_life_seconds)
+        self.employee_calibration_ = np.sort(risk.dropna().to_numpy())
+        self.employee_boundaries_ = self._boundaries(self.employee_calibration_)
         return self
+
+    def _boundaries(self, sorted_values):
+        return {'medium': float(np.quantile(sorted_values, 1 - self.policy.medium_fpr)),
+                'high': float(np.quantile(sorted_values, 1 - self.policy.high_fpr))}
+
+    @property
+    def half_life_seconds(self):
+        return self.risk_half_life_hours * 3600.0
 
     def tail_probability(self, scores):
         """Share of independent normal events scoring at least this high (add-one smoothed)."""
@@ -120,9 +127,16 @@ class InsiderThreatBrain:
         above = len(ref) - np.searchsorted(ref, np.asarray(scores, dtype=float), side='left')
         return (above + 1) / (len(ref) + 1)
 
-    def surprise(self, scores):
-        """Evidence in bits-of-ten: -log10 of the normal tail probability."""
-        return -np.log10(self.tail_probability(scores))
+    @staticmethod
+    def _percentile(sorted_reference, values):
+        return 100 * np.searchsorted(sorted_reference, np.asarray(values, dtype=float), side='right') / len(sorted_reference)
+
+    def event_percentile(self, scores):
+        """Percent of independent normal events scoring at or below these scores."""
+        return self._percentile(self.calibration_scores_, scores)
+
+    def employee_percentile(self, risk):
+        return self._percentile(self.employee_calibration_, risk)
 
     @staticmethod
     def _level(values, boundaries):
@@ -132,38 +146,31 @@ class InsiderThreatBrain:
     def event_levels(self, scores):
         return self._level(scores, self.boundaries_)
 
+    def employee_levels(self, risk):
+        return self._level(risk, self.employee_boundaries_)
+
     # ------------------------------------------------------------------ employees
-    def _daily(self, scored):
-        """Aggregate event evidence per employee per local day.
+    def employee_risk(self, events, scores=None):
+        """Current rolling risk per employee at the end of `events`, ranked highest first.
 
-        risk = sum of event surprise (-log10 normal tail probability). Summing log
-        tail probabilities is Fisher's way of combining independent evidence, so
-        several unusual events accumulate into more risk than one blip.
+        Ranking uses only the aggregated anomaly scores. Event counts are reported
+        as context and never used for ordering.
         """
-        data = scored.dropna(subset=['employee_id']).copy()
-        data['surprise'] = self.surprise(data['score'])
-        data['day'] = data['ts'].dt.tz_convert('Asia/Riyadh').dt.date
-        grouped = data.groupby(['employee_id', 'day'])
-        out = grouped.agg(events=('score', 'size'), max_score=('score', 'max'), risk=('surprise', 'sum'))
-        out['high_events'] = grouped['score'].apply(lambda s: int((s >= self.boundaries_['high']).sum()))
-        return out.reset_index()
-
-    def employee_daily_risk(self, events):
-        scored = events.assign(score=self.score_events(events))
-        daily = self._daily(scored)
-        daily['level'] = self._level(daily['risk'], self.employee_boundaries_)
-        daily['risk_percentile'] = 100 * (np.searchsorted(self.employee_calibration_, daily['risk'], side='right') / len(self.employee_calibration_))
-        return daily
-
-    def employee_risk(self, events):
-        """One row per employee, ranked by their worst day in the window."""
-        daily = self.employee_daily_risk(events)
-        worst = daily.sort_values('risk', ascending=False).drop_duplicates('employee_id')
-        totals = daily.groupby('employee_id').agg(days_observed=('day', 'nunique'), total_events=('events', 'sum'),
-                                                  high_events=('high_events', 'sum'))
-        table = worst.set_index('employee_id')[['risk', 'level', 'risk_percentile', 'day', 'max_score']]
-        table = table.rename(columns={'day': 'worst_day', 'risk': 'peak_daily_risk'}).join(totals)
-        return table.sort_values('peak_daily_risk', ascending=False).reset_index()
+        scored = events.assign(score=self.score_events(events) if scores is None else scores)
+        scored['risk'] = rolling_risk(scored, self.half_life_seconds)
+        scored = scored.dropna(subset=['employee_id']).sort_values('ts', kind='stable')
+        grouped = scored.groupby('employee_id')
+        table = pd.DataFrame({
+            'risk': grouped['risk'].last(),
+            'peak_risk': grouped['risk'].max(),
+            'last_activity': grouped['ts'].max(),
+            'max_event_score': grouped['score'].max(),
+            'events': grouped.size(),
+            'high_events': grouped['score'].apply(lambda s: int((s >= self.boundaries_['high']).sum())),
+        })
+        table['level'] = self.employee_levels(table['risk'])
+        table['risk_percentile'] = self.employee_percentile(table['risk'])
+        return table.sort_values('risk', ascending=False).reset_index()
 
     # ------------------------------------------------------------------ explanation
     def explain(self, events, top=3):

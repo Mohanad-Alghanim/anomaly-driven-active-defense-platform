@@ -120,7 +120,8 @@ class BrainTests(unittest.TestCase):
         self.assertEqual(table.employee_id.nunique(), len(table))
         self.assertEqual(table.iloc[0].employee_id, 'EMP0003')
         self.assertEqual(table.iloc[0].level, 'high')
-        self.assertTrue(table.peak_daily_risk.is_monotonic_decreasing)
+        self.assertTrue(table.risk.is_monotonic_decreasing)
+        self.assertNotIn('destination_port', self.brain.feature_names)
 
     def test_explanations_name_the_deviating_features(self):
         reasons = self.brain.explain(anomalous_like(self.test, n=3))
@@ -144,6 +145,58 @@ class BrainTests(unittest.TestCase):
             text = (BRAIN_DIR / module).read_text()
             self.assertNotIn('Ground_Truth_Evaluation', text)
             self.assertNotIn('load_evaluation_labels', text)
+
+    def test_employee_calibration_uses_rolling_risk(self):
+        self.assertAlmostEqual(self.brain.employee_boundaries_['high'], float(np.quantile(self.brain.employee_calibration_, 0.99)))
+        self.assertGreater(len(self.brain.employee_calibration_), len(self.calibration) // 2)
+
+
+class RiskTests(unittest.TestCase):
+    def test_decayed_mean_is_count_free_and_recency_weighted(self):
+        from monitor.brain.risk import RiskState
+        once, twice = RiskState(), RiskState()
+        for t, score in ((0, 0.4), (3600, 0.6), (7200, 0.5)):
+            once.update(t, score, 86400)
+            twice.update(t, score, 86400)
+            twice.update(t, score, 86400)
+        self.assertAlmostEqual(once.risk, twice.risk)
+        recent, old = RiskState(), RiskState()
+        recent.update(0, 0.4, 3600); recent.update(36000, 0.7, 3600)
+        old.update(0, 0.7, 3600); old.update(36000, 0.4, 3600)
+        self.assertGreater(recent.risk, old.risk)
+        late = RiskState(); late.update(100, 0.5, 3600); late.update(0, 0.9, 3600)
+        self.assertEqual(late.last_ts, 100)
+        self.assertGreater(late.risk, 0.5)
+
+
+class TelemetryDerivationTests(unittest.TestCase):
+    def test_dataset_conventions(self):
+        from monitor.brain.telemetry import Directory, count_previous_hour, derive_features
+        directory = Directory(dict(timezone='Asia/Riyadh', weekend_days=[4, 5],
+                                   devices=[dict(source_ip='10.0.0.1', device_id='D1', employee_id='E1')],
+                                   employees=[dict(employee_id='E1', work_start='08:00', work_end='16:00')], servers=[]))
+        # 2026-11-06 is a Friday; 06:30 UTC = 09:30 Riyadh.
+        ts = pd.Timestamp('2026-11-06T06:30:00Z').timestamp()
+        frame = pd.DataFrame(dict(ts=[ts, ts + 1800, ts + 3600, ts + 3601], source_ip='10.0.0.1', destination_ip=None,
+                                  destination_port=443, protocol='TCP', destination_service='ERP', bytes_in=[0, 1, 2, 3],
+                                  bytes_out=100, response_time_ms=np.nan, employee_id='E1'))
+        frame['source_events_previous_hour'] = count_previous_hour(frame)
+        self.assertEqual(frame.source_events_previous_hour.tolist(), [0, 1, 2, 2])
+        out = derive_features(frame, directory)
+        self.assertAlmostEqual(out.hour_sin.iloc[0], np.sin(2 * np.pi * 9.5 / 24))
+        self.assertAlmostEqual(out.day_of_week_sin.iloc[0], np.sin(2 * np.pi * 4 / 7))
+        self.assertEqual(out.is_weekend_observed.iloc[0], 1)
+        self.assertEqual(out.within_assumed_work_hours.iloc[0], 1)
+        self.assertAlmostEqual(out.bytes_in_log1p.iloc[2], np.log1p(2))
+        self.assertTrue(out.response_time_ms_log1p.isna().all())
+
+    def test_normalize_event_validates_and_maps_legacy_keys(self):
+        from monitor.brain.telemetry import normalize_event
+        event = normalize_event(dict(ts='2026-11-06T06:30:00+00:00', ip='10.0.0.1', dst_ip='10.0.0.2', port=22, bytes_out=5))
+        self.assertEqual((event['source_ip'], event['destination_ip'], event['destination_port']), ('10.0.0.1', '10.0.0.2', 22))
+        for bad in (dict(ts=1, bytes_in=-1), dict(ts=1, source_ip='x'), dict(ts=1, destination_port=70000), dict(message='no ts')):
+            with self.assertRaises(ValueError):
+                normalize_event(bad)
 
 
 if __name__ == '__main__':

@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score, roc_auc_score
 
+from .risk import rolling_risk
 from .schema import BASE_CATEGORICAL
 
 
@@ -86,13 +87,30 @@ def feature_audit(brain, frame, train):
 
 
 def employee_days(brain, window, labels):
-    daily = brain.employee_daily_risk(window)
-    truth = window.merge(labels, on='feature_row_id')
-    truth['day'] = truth.ts.dt.tz_convert('Asia/Riyadh').dt.date
-    positive = truth[truth.label_binary == 1].groupby(['employee_id', 'day']).size().rename('attack_events')
-    daily = daily.merge(positive.reset_index(), on=['employee_id', 'day'], how='left')
-    daily['attack_events'] = daily.attack_events.fillna(0).astype(int)
+    """Employee-day evaluation: rolling risk at the employee's last event of each local day.
+    A day is positive if it contains any attack event. Event count per day is kept only
+    to compare against (it is not part of the risk)."""
+    scored = window.assign(score=brain.score_events(window))
+    scored['risk'] = rolling_risk(scored, brain.half_life_seconds)
+    scored = scored.dropna(subset=['employee_id']).merge(labels, on='feature_row_id')
+    scored['day'] = scored.ts.dt.tz_convert('Asia/Riyadh').dt.date
+    scored = scored.sort_values('ts', kind='stable')
+    grouped = scored.groupby(['employee_id', 'day'])
+    daily = grouped.agg(risk=('risk', 'last'), events=('score', 'size'),
+                        attack_events=('label_binary', 'sum')).reset_index()
     y = (daily.attack_events > 0).astype(int)
     result = headline(y, daily.risk, brain.employee_boundaries_)
-    result['unit'] = 'employee-day'
+    result['unit'] = 'employee-day (rolling risk at the last event of the day)'
+    result['event_count_only_auroc_for_reference'] = float(roc_auc_score(y, daily.events))
+    result['risk_vs_event_count_spearman'] = float(daily[['risk', 'events']].corr(method='spearman').iloc[0, 1])
     return result, daily
+
+
+def count_invariance(brain, window):
+    """Duplicate every event: a count-free aggregation must give the same ranking."""
+    sample = window.dropna(subset=['employee_id'])
+    base = brain.employee_risk(sample)
+    doubled = brain.employee_risk(pd.concat([sample, sample], ignore_index=True))
+    merged = base.merge(doubled, on='employee_id', suffixes=('', '_doubled'))
+    return dict(max_abs_risk_change=float((merged.risk - merged.risk_doubled).abs().max()),
+                ranking_identical=bool((base.employee_id.to_numpy() == doubled.employee_id.to_numpy()).all()))

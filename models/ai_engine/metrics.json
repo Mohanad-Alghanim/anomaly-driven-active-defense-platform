@@ -1,7 +1,39 @@
 {
-  "generated_at_utc": "2026-11-21T11:48:52+00:00",
+  "generated_at_utc": "2026-11-21T13:27:52+00:00",
   "dataset": "Behavioral_Intelligence_Dataset_INTERNAL_ATTACKS_6_CLEANED.xlsx",
   "dataset_type": "synthetic_only",
+  "headline": {
+    "full_model": {
+      "auroc": 0.9982589175891758,
+      "auprc": 0.9947667438088319,
+      "recall_at_1pct_fpr": 0.9769372693726938,
+      "realized_false_positive_rate": 0.011444444444444445
+    },
+    "artifact_free_floor": {
+      "auroc": 0.9736378126281263,
+      "auprc": 0.8833397842567499,
+      "recall_at_1pct_fpr": 0.45571955719557194,
+      "realized_false_positive_rate": 0.012444444444444444,
+      "excludes": [
+        "destination_port",
+        "source_events_previous_hour",
+        "emp_activity_z"
+      ]
+    },
+    "read_this": "Report both numbers together. The full model benefits from dataset artifacts; the floor is the honest estimate without them. Neither establishes real-world detection performance.",
+    "artifacts": [
+      {
+        "name": "destination_port",
+        "finding": "In normal data the port is random relative to the service (53/443/445/1194/5432 for every service); attacks use canonical service ports, and 22/389/8088/8443 never occur in normal traffic.",
+        "decision": "Removed from the model matrix before the final training run: a generation artifact with no behavioural meaning; random ports per service are not realistic."
+      },
+      {
+        "name": "burst volume on a sparse normal baseline (source_events_previous_hour, emp_activity_z)",
+        "finding": "Each employee has only 60 normal events in ~90 days, so normal activity in the preceding hour is almost always 0, while attack scenarios are dense bursts (~20 events, seconds apart).",
+        "decision": "Kept in the model. Limitation: on this sparse baseline these features separate far more easily than they would on production telemetry. The artifact-free floor excludes them."
+      }
+    ]
+  },
   "model": "IsolationForest (unsupervised, trained on normal behaviour only)",
   "model_config": {
     "n_estimators": 300,
@@ -28,59 +60,62 @@
     "emp_service_rarity",
     "emp_activity_z",
     "protocol",
-    "destination_service",
+    "destination_service"
+  ],
+  "excluded_dataset_features": [
     "destination_port"
   ],
   "protocol": {
     "training": "Normal_Behavior_Learning, earliest 70% by time (42000 events, before 2026-10-22T07:44:26+00:00)",
     "calibration": "Normal_Behavior_Learning, next 15% (9000 events); level boundaries are quantiles of these scores",
     "evaluation": "Remaining normal events from 2026-11-04T11:10:57+00:00 (9000) and all 2,168 attack events; labels from Ground_Truth_Evaluation used only here",
-    "entity_attribution": "source_ip -> Device_Profiles -> employee_id (as a live collector would); identifiers never enter the model matrix",
+    "entity_attribution": "source_ip -> Device_Profiles -> employee_id (as the live collector does); identifiers never enter the model matrix",
     "personal_baselines": "recomputed from the training window only; the workbook Employee_Behavior_Baselines cover all 60,000 normal events and would leak held-out normal statistics"
   },
   "level_policy": {
     "medium_false_positive_budget": 0.05,
     "high_false_positive_budget": 0.01,
     "event_score_boundaries": {
-      "medium": 0.5307709103359147,
-      "high": 0.5605416575794023
+      "medium": 0.5326604719413894,
+      "high": 0.5658480964630539
     },
-    "employee_day_risk_boundaries": {
-      "medium": 1.9181635758079296,
-      "high": 2.9825048846280424
-    }
+    "employee_risk_boundaries": {
+      "medium": 0.502327589102067,
+      "high": 0.5348375522575698
+    },
+    "employee_risk": "time-decayed mean of event anomaly scores (half-life 24 h); event count is not an input; boundaries are quantiles of the same aggregate replayed over calibration normals"
   },
   "all_attacks_vs_heldout_normals": {
     "events": 11168,
     "attacks": 2168,
     "normals": 9000,
-    "auroc": 0.9972498462484624,
-    "auprc": 0.991362653483974,
+    "auroc": 0.9982589175891758,
+    "auprc": 0.9947667438088319,
     "attack_prevalence": 0.19412607449856734,
     "high_level": {
-      "score_boundary": 0.5605416575794023,
-      "recall": 0.9672509225092251,
-      "realized_false_positive_rate": 0.011555555555555555,
-      "precision": 0.9527487505679236
+      "score_boundary": 0.5658480964630539,
+      "recall": 0.9769372693726938,
+      "realized_false_positive_rate": 0.011444444444444445,
+      "precision": 0.9536244934714093
     },
     "medium_level": {
-      "score_boundary": 0.5307709103359147,
-      "recall": 0.9893911439114391,
-      "realized_false_positive_rate": 0.04855555555555555,
-      "precision": 0.8307513555383423
+      "score_boundary": 0.5326604719413894,
+      "recall": 0.9916974169741697,
+      "realized_false_positive_rate": 0.05255555555555556,
+      "precision": 0.819672131147541
     },
     "confidence_95": {
       "auroc": [
-        0.9958201703895527,
-        0.99837548657576
+        0.9974375549421868,
+        0.9991127884211471
       ],
       "auprc": [
-        0.9877728369841422,
-        0.9944716799656936
+        0.9923290098796582,
+        0.9970497985774234
       ],
       "recall_at_high_level": [
-        0.9547917652626597,
-        0.9794169858971857
+        0.9665553708693211,
+        0.9860143586677719
       ]
     }
   },
@@ -88,74 +123,74 @@
     "events": 9515,
     "attacks": 515,
     "normals": 9000,
-    "auroc": 0.9972073354908305,
-    "auprc": 0.9739098142831135,
+    "auroc": 0.9984079827400216,
+    "auprc": 0.986077038800238,
     "attack_prevalence": 0.054125065685759324,
     "high_level": {
-      "score_boundary": 0.5605416575794023,
-      "recall": 0.9650485436893204,
-      "realized_false_positive_rate": 0.011555555555555555,
-      "precision": 0.826955074875208
+      "score_boundary": 0.5658480964630539,
+      "recall": 0.9766990291262136,
+      "realized_false_positive_rate": 0.011444444444444445,
+      "precision": 0.83003300330033
     },
     "medium_level": {
-      "score_boundary": 0.5307709103359147,
-      "recall": 0.9883495145631068,
-      "realized_false_positive_rate": 0.04855555555555555,
-      "precision": 0.5380549682875264
+      "score_boundary": 0.5326604719413894,
+      "recall": 0.9902912621359223,
+      "realized_false_positive_rate": 0.05255555555555556,
+      "precision": 0.5188199389623601
     }
   },
   "per_attack_category": {
     "Credential Misuse": {
       "events": 361,
       "sessions": 19,
-      "auroc_vs_normal": 0.9943798091720529,
-      "auprc_vs_normal": 0.9404413746861615,
-      "recall_at_high_level": 0.9418282548476454,
-      "recall_at_medium_level": 0.9778393351800554,
+      "auroc_vs_normal": 0.9978113265620192,
+      "auprc_vs_normal": 0.9766204341024042,
+      "recall_at_high_level": 0.9695290858725761,
+      "recall_at_medium_level": 0.9889196675900277,
       "sessions_with_any_high_event": 19
     },
     "Data Exfiltration": {
       "events": 362,
       "sessions": 19,
-      "auroc_vs_normal": 0.9992387968078577,
-      "auprc_vs_normal": 0.9890528837150423,
-      "recall_at_high_level": 0.9861878453038674,
-      "recall_at_medium_level": 0.9972375690607734,
+      "auroc_vs_normal": 0.9989260282381829,
+      "auprc_vs_normal": 0.9875886378333602,
+      "recall_at_high_level": 0.9779005524861878,
+      "recall_at_medium_level": 0.994475138121547,
       "sessions_with_any_high_event": 19
     },
     "Data Snooping": {
       "events": 361,
       "sessions": 19,
-      "auroc_vs_normal": 0.9994776854416743,
-      "auprc_vs_normal": 0.9923281407544768,
-      "recall_at_high_level": 0.9916897506925207,
+      "auroc_vs_normal": 0.9994422899353648,
+      "auprc_vs_normal": 0.9925512565472235,
+      "recall_at_high_level": 0.9889196675900277,
       "recall_at_medium_level": 0.997229916897507,
       "sessions_with_any_high_event": 19
     },
     "Privilege Escalation": {
       "events": 362,
       "sessions": 19,
-      "auroc_vs_normal": 0.9960926949048495,
-      "auprc_vs_normal": 0.9496167570295699,
-      "recall_at_high_level": 0.9585635359116023,
-      "recall_at_medium_level": 0.988950276243094,
+      "auroc_vs_normal": 0.9986516267648864,
+      "auprc_vs_normal": 0.9820654441032949,
+      "recall_at_high_level": 0.9834254143646409,
+      "recall_at_medium_level": 0.994475138121547,
       "sessions_with_any_high_event": 19
     },
     "SQL Injection": {
       "events": 361,
       "sessions": 19,
-      "auroc_vs_normal": 0.9977571560480147,
-      "auprc_vs_normal": 0.9722572407237138,
-      "recall_at_high_level": 0.96398891966759,
+      "auroc_vs_normal": 0.9968202523853493,
+      "auprc_vs_normal": 0.9770916546719304,
+      "recall_at_high_level": 0.9667590027700831,
       "recall_at_medium_level": 0.9889196675900277,
       "sessions_with_any_high_event": 19
     },
     "Sabotage / Log Tampering": {
       "events": 361,
       "sessions": 19,
-      "auroc_vs_normal": 0.9965506309633733,
-      "auprc_vs_normal": 0.9597374741139464,
-      "recall_at_high_level": 0.961218836565097,
+      "auroc_vs_normal": 0.9978990458602647,
+      "auprc_vs_normal": 0.9783371861989153,
+      "recall_at_high_level": 0.9750692520775623,
       "recall_at_medium_level": 0.9861495844875346,
       "sessions_with_any_high_event": 19
     }
@@ -219,11 +254,6 @@
         "univariate_auroc": 0.5561762761377613,
         "attack_share_unseen_in_normal_training": 0.0,
         "normal_share_unseen_in_normal_training": 0.0
-      },
-      "destination_port": {
-        "univariate_auroc": 0.8630193470684706,
-        "attack_share_unseen_in_normal_training": 0.5276752767527675,
-        "normal_share_unseen_in_normal_training": 0.0
       }
     },
     "near_separating_features": [
@@ -236,30 +266,76 @@
     ]
   },
   "employee_day": {
-    "events": 5986,
-    "attacks": 13,
-    "normals": 5973,
-    "auroc": 1.0,
-    "auprc": 1.0,
-    "attack_prevalence": 0.002171734046107584,
-    "high_level": {
-      "score_boundary": 2.9825048846280424,
-      "recall": 1.0,
-      "realized_false_positive_rate": 0.011217143813828897,
-      "precision": 0.1625
+    "full_model": {
+      "events": 5986,
+      "attacks": 13,
+      "normals": 5973,
+      "auroc": 0.9985833687491147,
+      "auprc": 0.669638165152074,
+      "attack_prevalence": 0.002171734046107584,
+      "high_level": {
+        "score_boundary": 0.5348375522575698,
+        "recall": 1.0,
+        "realized_false_positive_rate": 0.014732965009208104,
+        "precision": 0.12871287128712872
+      },
+      "medium_level": {
+        "score_boundary": 0.502327589102067,
+        "recall": 1.0,
+        "realized_false_positive_rate": 0.06462414197220827,
+        "precision": 0.03258145363408521
+      },
+      "unit": "employee-day (rolling risk at the last event of the day)",
+      "event_count_only_auroc_for_reference": 1.0,
+      "risk_vs_event_count_spearman": 0.04000957405823209
     },
-    "medium_level": {
-      "score_boundary": 1.9181635758079296,
-      "recall": 1.0,
-      "realized_false_positive_rate": 0.05658797923991294,
-      "precision": 0.037037037037037035
-    },
-    "unit": "employee-day"
+    "artifact_free_floor": {
+      "events": 5986,
+      "attacks": 13,
+      "normals": 5973,
+      "auroc": 0.9758915118031141,
+      "auprc": 0.2292874216790093,
+      "attack_prevalence": 0.002171734046107584,
+      "high_level": {
+        "score_boundary": 0.5534607166668833,
+        "recall": 0.6923076923076923,
+        "realized_false_positive_rate": 0.014398124895362465,
+        "precision": 0.09473684210526316
+      },
+      "medium_level": {
+        "score_boundary": 0.5167329630461979,
+        "recall": 0.9230769230769231,
+        "realized_false_positive_rate": 0.06495898208605391,
+        "precision": 0.03
+      },
+      "unit": "employee-day (rolling risk at the last event of the day)",
+      "event_count_only_auroc_for_reference": 1.0,
+      "risk_vs_event_count_spearman": -0.08366289841549872
+    }
+  },
+  "employee_risk_count_invariance": {
+    "max_abs_risk_change": 6.661338147750939e-16,
+    "ranking_identical": true
   },
   "employee_ranking_heldout_window": {
     "employees_ranked": 1000,
     "employees_with_attacks_in_window": 13,
-    "their_ranks": [
+    "ranks_by_current_risk_at_window_end": [
+      1,
+      2,
+      3,
+      91,
+      108,
+      256,
+      268,
+      280,
+      552,
+      555,
+      623,
+      766,
+      794
+    ],
+    "ranks_by_peak_risk_in_window": [
       1,
       2,
       3,
@@ -269,200 +345,20 @@
       7,
       8,
       9,
-      10,
       11,
-      12,
-      13
+      19,
+      23,
+      30
     ],
-    "employees_at_high_level": 76
+    "employees_at_high_level_at_window_end": 6,
+    "note": "Current risk is a decayed mean, so an employee whose recent activity is normal again falls back down; peak risk keeps the incident visible."
   },
-  "top_event_explanations": [
-    {
-      "employee_id": "EMP0318",
-      "score": 0.6419351445752461,
-      "level": "high",
-      "reasons": [
-        "destination_port=8088 never seen in normal behaviour",
-        "emp_activity_z +619.3 sd from normal",
-        "source_events_previous_hour +214.5 sd from normal"
-      ]
-    },
-    {
-      "employee_id": "EMP0318",
-      "score": 0.6417903860548043,
-      "level": "high",
-      "reasons": [
-        "destination_port=8088 never seen in normal behaviour",
-        "emp_activity_z +453.4 sd from normal",
-        "source_events_previous_hour +157.0 sd from normal"
-      ]
-    },
-    {
-      "employee_id": "EMP0318",
-      "score": 0.6417903860548043,
-      "level": "high",
-      "reasons": [
-        "destination_port=8088 never seen in normal behaviour",
-        "emp_activity_z +464.5 sd from normal",
-        "source_events_previous_hour +160.8 sd from normal"
-      ]
-    },
-    {
-      "employee_id": "EMP0318",
-      "score": 0.6417903860548043,
-      "level": "high",
-      "reasons": [
-        "destination_port=8088 never seen in normal behaviour",
-        "emp_activity_z +486.6 sd from normal",
-        "source_events_previous_hour +168.5 sd from normal"
-      ]
-    },
-    {
-      "employee_id": "EMP0318",
-      "score": 0.6417903860548043,
-      "level": "high",
-      "reasons": [
-        "destination_port=8088 never seen in normal behaviour",
-        "emp_activity_z +530.8 sd from normal",
-        "source_events_previous_hour +183.8 sd from normal"
-      ]
-    }
-  ],
-  "ablations": {
-    "base_13_features": {
-      "features": [
-        "hour_sin",
-        "hour_cos",
-        "day_of_week_sin",
-        "day_of_week_cos",
-        "is_weekend_observed",
-        "within_assumed_work_hours",
-        "bytes_in_log1p",
-        "bytes_out_log1p",
-        "response_time_ms_log1p",
-        "source_events_previous_hour",
-        "protocol",
-        "destination_service",
-        "destination_port"
-      ],
-      "auroc": 0.9782704489544896,
-      "auprc": 0.9061115669527835,
-      "recall_at_1pct_fpr": 0.5382841328413284,
-      "per_category_recall_at_1pct_fpr": {
-        "Credential Misuse": 0.3850415512465374,
-        "Data Exfiltration": 0.5662983425414365,
-        "Data Snooping": 0.6925207756232687,
-        "Privilege Escalation": 0.494475138121547,
-        "SQL Injection": 0.6454293628808865,
-        "Sabotage / Log Tampering": 0.44598337950138506
-      },
-      "per_category_auroc": {
-        "Credential Misuse": 0.9606035703293322,
-        "Data Exfiltration": 0.9907648864333949,
-        "Data Snooping": 0.9924783010156972,
-        "Privilege Escalation": 0.970341620626151,
-        "SQL Injection": 0.9841089566020313,
-        "Sabotage / Log Tampering": 0.9713127116035704
-      }
-    },
-    "base_13_without_destination_port": {
-      "features": [
-        "hour_sin",
-        "hour_cos",
-        "day_of_week_sin",
-        "day_of_week_cos",
-        "is_weekend_observed",
-        "within_assumed_work_hours",
-        "bytes_in_log1p",
-        "bytes_out_log1p",
-        "response_time_ms_log1p",
-        "source_events_previous_hour",
-        "protocol",
-        "destination_service"
-      ],
-      "auroc": 0.9851818368183682,
-      "auprc": 0.928292633420044,
-      "recall_at_1pct_fpr": 0.49538745387453875,
-      "per_category_recall_at_1pct_fpr": {
-        "Credential Misuse": 0.5595567867036011,
-        "Data Exfiltration": 0.43646408839779005,
-        "Data Snooping": 0.46814404432132967,
-        "Privilege Escalation": 0.5165745856353591,
-        "SQL Injection": 0.5263157894736842,
-        "Sabotage / Log Tampering": 0.46537396121883656
-      },
-      "per_category_auroc": {
-        "Credential Misuse": 0.9863416435826409,
-        "Data Exfiltration": 0.9827265193370166,
-        "Data Snooping": 0.9864610649430593,
-        "Privilege Escalation": 0.9868388581952119,
-        "SQL Injection": 0.9853345644813789,
-        "Sabotage / Log Tampering": 0.9833905817174515
-      }
-    },
-    "personal_without_destination_port": {
-      "features": [
-        "hour_sin",
-        "hour_cos",
-        "day_of_week_sin",
-        "day_of_week_cos",
-        "is_weekend_observed",
-        "within_assumed_work_hours",
-        "bytes_in_log1p",
-        "bytes_out_log1p",
-        "response_time_ms_log1p",
-        "source_events_previous_hour",
-        "emp_bytes_in_z",
-        "emp_bytes_out_z",
-        "emp_response_time_z",
-        "emp_hour_deviation",
-        "emp_service_rarity",
-        "emp_activity_z",
-        "protocol",
-        "destination_service"
-      ],
-      "auroc": 0.9982589175891758,
-      "auprc": 0.9947667438088319,
-      "recall_at_1pct_fpr": 0.9769372693726938,
-      "per_category_recall_at_1pct_fpr": {
-        "Credential Misuse": 0.9695290858725761,
-        "Data Exfiltration": 0.9779005524861878,
-        "Data Snooping": 0.9889196675900277,
-        "Privilege Escalation": 0.9834254143646409,
-        "SQL Injection": 0.9667590027700831,
-        "Sabotage / Log Tampering": 0.9750692520775623
-      },
-      "per_category_auroc": {
-        "Credential Misuse": 0.9978113265620192,
-        "Data Exfiltration": 0.9989260282381829,
-        "Data Snooping": 0.9994422899353648,
-        "Privilege Escalation": 0.9986516267648864,
-        "SQL Injection": 0.9968202523853493,
-        "Sabotage / Log Tampering": 0.9978990458602647
-      }
-    },
-    "personal_without_port_and_burst_volume": {
-      "features": [
-        "hour_sin",
-        "hour_cos",
-        "day_of_week_sin",
-        "day_of_week_cos",
-        "is_weekend_observed",
-        "within_assumed_work_hours",
-        "bytes_in_log1p",
-        "bytes_out_log1p",
-        "response_time_ms_log1p",
-        "emp_bytes_in_z",
-        "emp_bytes_out_z",
-        "emp_response_time_z",
-        "emp_hour_deviation",
-        "emp_service_rarity",
-        "protocol",
-        "destination_service"
-      ],
+  "variants": {
+    "artifact_free_floor": {
       "auroc": 0.9736378126281263,
       "auprc": 0.8833397842567499,
       "recall_at_1pct_fpr": 0.45571955719557194,
+      "realized_false_positive_rate": 0.012444444444444444,
       "per_category_recall_at_1pct_fpr": {
         "Credential Misuse": 0.4265927977839335,
         "Data Exfiltration": 0.39779005524861877,
@@ -478,24 +374,91 @@
         "Privilege Escalation": 0.9751860036832413,
         "SQL Injection": 0.9676595875654047,
         "Sabotage / Log Tampering": 0.9733216374269006
-      }
+      },
+      "features": [
+        "hour_sin",
+        "hour_cos",
+        "day_of_week_sin",
+        "day_of_week_cos",
+        "is_weekend_observed",
+        "within_assumed_work_hours",
+        "bytes_in_log1p",
+        "bytes_out_log1p",
+        "response_time_ms_log1p",
+        "emp_bytes_in_z",
+        "emp_bytes_out_z",
+        "emp_response_time_z",
+        "emp_hour_deviation",
+        "emp_service_rarity",
+        "protocol",
+        "destination_service"
+      ]
+    },
+    "base_12_features": {
+      "auroc": 0.9851818368183682,
+      "auprc": 0.928292633420044,
+      "recall_at_1pct_fpr": 0.49538745387453875,
+      "realized_false_positive_rate": 0.007333333333333333,
+      "per_category_recall_at_1pct_fpr": {
+        "Credential Misuse": 0.5595567867036011,
+        "Data Exfiltration": 0.43646408839779005,
+        "Data Snooping": 0.46814404432132967,
+        "Privilege Escalation": 0.5165745856353591,
+        "SQL Injection": 0.5263157894736842,
+        "Sabotage / Log Tampering": 0.46537396121883656
+      },
+      "per_category_auroc": {
+        "Credential Misuse": 0.9863416435826409,
+        "Data Exfiltration": 0.9827265193370166,
+        "Data Snooping": 0.9864610649430593,
+        "Privilege Escalation": 0.9868388581952119,
+        "SQL Injection": 0.9853345644813789,
+        "Sabotage / Log Tampering": 0.9833905817174515
+      },
+      "features": [
+        "hour_sin",
+        "hour_cos",
+        "day_of_week_sin",
+        "day_of_week_cos",
+        "is_weekend_observed",
+        "within_assumed_work_hours",
+        "bytes_in_log1p",
+        "bytes_out_log1p",
+        "response_time_ms_log1p",
+        "source_events_previous_hour",
+        "protocol",
+        "destination_service"
+      ]
     }
   },
-  "leakage_alert": null,
-  "perfect_score_alerts": [
-    {
-      "metric": "employee_day.auroc",
-      "value": 1.0,
-      "identifier_or_label_in_matrix": false,
-      "event_count_only_auroc": 1.0,
-      "normal_day_max_events": 7,
-      "attack_day_min_events": 8,
-      "diagnosis": "Not a leak: no identifier/label reaches the model, but the number of events per employee-day alone separates the classes perfectly. Attack scenarios are generated as dense bursts while each employee has only 60 normal events in ~90 days. Employee-day separation therefore reflects the dataset generator, not detection skill."
-    }
-  ],
+  "live_feature_parity": {
+    "description": "Features derived from raw telemetry by the live collector code vs. workbook Model_Features (normal rows).",
+    "max_abs_difference": {
+      "hour_sin": 5.551115123125783e-16,
+      "hour_cos": 5.551115123125783e-16,
+      "day_of_week_sin": 3.3306690738754696e-16,
+      "day_of_week_cos": 4.440892098500626e-16,
+      "is_weekend_observed": 0.0,
+      "within_assumed_work_hours": 0.0,
+      "bytes_in_log1p": 4.085620730620576e-14,
+      "bytes_out_log1p": 5.329070518200751e-15,
+      "response_time_ms_log1p": 0.0,
+      "destination_port": 0.0,
+      "protocol": 0.0,
+      "destination_service": 0.0,
+      "source_events_previous_hour": 90.0
+    },
+    "source_events_previous_hour_mismatched_normal_rows": 3,
+    "mismatch_explanation": "Normal events that follow an attack burst from the same device: live counting includes all traffic from the IP.",
+    "attack_rows_time_inconsistency": "Attack rows in Model_Features carry hour/day features that do not match their own timestamps (e.g. 19:00 Friday encoded as 09:30 Thursday). The live path derives time from the timestamp.",
+    "replayed_attacks_recall_at_high_level": 0.9833948339483395,
+    "replayed_attacks_auroc_vs_heldout_normals": 0.9986057810578106
+  },
+  "perfect_score_alerts": null,
   "limitations": [
     "Training and evaluation data are synthetic; no real-world detection claim is made.",
     "Anomaly means deviation from learned normal behaviour; it is not proof of malicious intent.",
-    "Feature design was fixed before evaluation; the ablations show sensitivity to dataset generation artifacts."
+    "The normal baseline is sparse (60 events per employee in ~90 days), so volume and burst features separate attacks here more easily than they would on production telemetry.",
+    "All six attack categories share one generated volume/bytes profile; per-category results mostly reflect that profile."
   ]
 }
