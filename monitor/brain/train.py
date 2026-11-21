@@ -13,11 +13,13 @@ employee_risk_heldout_window.csv; samples/behavioral_demo.jsonl (unlabelled demo
 """
 import argparse
 import json
+import platform
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 import sklearn
 from sklearn.metrics import roc_auc_score
@@ -27,6 +29,7 @@ from .dataset import DEFAULT_DATASET, chronological_split, load_evaluation_label
 from .model import InsiderThreatBrain
 from .replay import live_features, parity, raw_events, to_jsonl
 from .risk import epoch_seconds
+from .runtime import pandas_references
 from .schema import EXCLUDED_DATASET_FEATURES
 from .telemetry import Directory, export_directory
 
@@ -180,7 +183,10 @@ def main(argv=None):
         ),
         'model': 'IsolationForest (unsupervised, trained on normal behaviour only)',
         'model_config': dict(n_estimators=brain.n_estimators, random_state=brain.random_state, max_samples='auto',
-                             scoring='-score_samples (higher = more anomalous)', sklearn=sklearn.__version__),
+                             scoring='-score_samples (higher = more anomalous)', sklearn=sklearn.__version__,
+                             trained_with=dict(python=platform.python_version(), numpy=np.__version__, pandas=pd.__version__,
+                                               scikit_learn=sklearn.__version__, joblib=joblib.__version__),
+                             artifact_contains_pandas_objects=False),
         'features': brain.feature_names,
         'excluded_dataset_features': list(EXCLUDED_DATASET_FEATURES),
         'protocol': dict(
@@ -216,6 +222,10 @@ def main(argv=None):
     if any(p['metric'].startswith('event.') for p in perfect):
         print('LEAKAGE ALERT: perfect event-level separation', perfect, '- model not saved.', file=sys.stderr)
         return 2
+    leaked = pandas_references(brain)
+    if leaked:
+        print('PORTABILITY ALERT: pandas objects in the fitted model', leaked, '- model not saved.', file=sys.stderr)
+        return 3
     joblib.dump(brain, out / 'insider_brain.joblib', compress=3)
 
     print(f"FULL MODEL  AUROC={h['auroc']:.4f} AUPRC={h['auprc']:.4f} recall@1%FPR={h['high_level']['recall']:.3f} "

@@ -73,7 +73,9 @@ class InsiderThreatBrain:
         frame = frame[self.feature_names]
         assert_no_leakage(frame.columns)
         for column in self.categorical_:
-            frame[column] = frame[column].astype(str)
+            # Plain object strings: keeps pandas extension dtypes (pandas 3 StringDtype)
+            # out of the fitted encoder, so the pickled pipeline is pandas-version independent.
+            frame[column] = frame[column].astype(str).astype(object)
         return frame
 
     # ------------------------------------------------------------------ fitting

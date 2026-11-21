@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-11-21T13:27:52+00:00",
+  "generated_at_utc": "2026-11-21T16:40:50+00:00",
   "dataset": "Behavioral_Intelligence_Dataset_INTERNAL_ATTACKS_6_CLEANED.xlsx",
   "dataset_type": "synthetic_only",
   "headline": {
@@ -40,7 +40,15 @@
     "random_state": 42,
     "max_samples": "auto",
     "scoring": "-score_samples (higher = more anomalous)",
-    "sklearn": "1.9.1"
+    "sklearn": "1.9.1",
+    "trained_with": {
+      "python": "3.14.10",
+      "numpy": "2.5.5",
+      "pandas": "2.3.3",
+      "scikit_learn": "1.9.1",
+      "joblib": "1.6.0"
+    },
+    "artifact_contains_pandas_objects": false
   },
   "features": [
     "hour_sin",

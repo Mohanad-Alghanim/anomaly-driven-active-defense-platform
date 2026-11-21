@@ -3,12 +3,13 @@
 ## Automated suite
 
 ```bash
+.venv/bin/pip install -r requirements-dev.txt   # runtime requirements + pytest
 .venv/bin/python -m pytest -q
 ```
 
 | Area | What it checks |
 | --- | --- |
-| Brain (`tests/test_brain.py`) | Leakage guard; normal-only fitting; data-derived levels; count-free rolling risk; dataset feature conventions; no supervised estimators. |
+| Brain (`tests/test_brain.py`) | Leakage guard; normal-only fitting; data-derived levels; count-free rolling risk; dataset feature conventions; no supervised estimators; the pickled model (and the committed artifact) contains no pandas objects. |
 | Engine and collection (`tests/test_monitor.py`) | Every event scored; previous-hour counting; attribution; deduplication; rotation; malformed input; retired rule keys discarded; no rule engine left; demo dashboard ranking and explanation. |
 | Collector lifecycle (`tests/test_autonomous.py`) | Journal cursors and recovery; worker restart; capacity; concurrent read-only dashboard; deployment preparation. |
 | Lab (`tests/test_lab_delivery.py`) | Provisioning, including retirement of the old external-attack sources; telemetry inbox → collector → score → dashboard; unit rendering. |

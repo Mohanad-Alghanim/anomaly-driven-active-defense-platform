@@ -29,7 +29,9 @@ Model results, including the full model next to the artifact-free floor, are in
 
 ## Install
 
-Python 3.11+ is required.
+Python 3.11+ is required; the pinned versions in `requirements.txt` were verified on Kali with Python 3.14.10.
+`pip install -r requirements.txt` installs everything the dashboard, collector and training need (including
+scikit-learn, numpy, joblib and openpyxl); no manual installs are required.
 
 ```bash
 git clone https://github.com/Mohanad-Alghanim/anomaly-driven-active-defense-platform.git
@@ -68,6 +70,7 @@ The loopback lab provides:
 ## Tests
 
 ```bash
+.venv/bin/pip install -r requirements-dev.txt   # adds pytest
 .venv/bin/python -m pytest -q
 ```
 

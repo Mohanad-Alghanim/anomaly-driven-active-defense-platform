@@ -64,9 +64,7 @@ def event_reasons(brain, directory, employee_id, event, top=4):
     reasons = []
 
     def stat(name):
-        if base is None or employee_id not in base.continuous_[name].index:
-            return None
-        return base.continuous_[name].loc[employee_id]
+        return None if base is None else base.stat(name, employee_id)
 
     def add(feature, text):
         reasons.append(dict(feature=feature, label=FEATURE_LABELS.get(feature, feature), text=text,
@@ -89,16 +87,17 @@ def event_reasons(brain, directory, employee_id, event, top=4):
         add('emp_activity_z', f"{n} other event{'s' if n != 1 else ''} came from their device in the preceding hour; "
                               f"they normally average {s['mean']:.1f} ({value:+.1f} standard deviations).")
     value = features.get('emp_hour_deviation')
-    if base is not None and value is not None and employee_id in base.hour_.index:
-        usual = (base.hour_.at[employee_id, 'mean_angle'] % TWO_PI) * 24 / TWO_PI
-        spread = base.hour_.at[employee_id, 'std_hours']
+    habit = None if base is None else base.hour(employee_id)
+    if habit is not None and value is not None:
+        usual = (habit[0] % TWO_PI) * 24 / TWO_PI
+        spread = habit[1]
         local = datetime.fromtimestamp(event['ts'], timezone.utc).astimezone(_zone(directory))
         add('emp_hour_deviation', f"Active at {local:%H:%M} local time; their activity usually centres on {_clock(usual)} "
                                   f"(spread about {spread:.1f} h), so this is {value:.1f}× their normal spread away.")
     value = features.get('emp_service_rarity')
     service = features.get('destination_service') or event.get('dst_service')
-    if base is not None and value is not None and service and employee_id in base.service_prob_.index:
-        unseen = base.service_unseen_prob_[employee_id]
+    if base is not None and value is not None and service and base.knows(employee_id):
+        unseen = base.unseen_service_probability(employee_id)
         share = float(np.exp(-value))
         count = round(share / unseen - 1)
         text = (f"Accessed {service}, a service they never used during their baseline period." if count <= 0 else

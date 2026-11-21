@@ -48,15 +48,16 @@ repository; it was one commit ahead of `aafb5cd`). Final home: `Mohanad-Alghanim
 | --- | --- |
 | `schema.py` | Approved model inputs (12 dataset features without the port, plus 6 personal deviations) and the leakage guard. |
 | `dataset.py` | Workbook loader: features and attribution context only; labels through an evaluation-only loader. |
-| `features.py` | Per-employee baselines from training normals. |
+| `features.py` | Per-employee baselines from training normals (stored as numpy arrays, no pandas objects). |
 | `model.py` | Pipeline + IsolationForest; event and employee levels from calibration quantiles; employee ranking. |
 | `risk.py` | Rolling employee risk (time-decayed mean, count-free), shared by training, evaluation and the collector. |
 | `telemetry.py` | Live normalization, attribution and feature derivation, matching the workbook to floating-point precision. |
 | `explain.py` | Plain-language employee explanations. |
-| `runtime.py` | Cached artifact loading and model version. |
+| `runtime.py` | Cached artifact loading, model version, pandas-free pickle check. |
 | `train.py`, `evaluate.py`, `replay.py` | Training, evaluation, exports, parity check, replay to JSONL. |
 
 ## Roadmap (each phase waits for approval)
 
+* **Phase 2.5 (done):** Kali environment pinned; model retrained on Kali and made pandas-version independent. See [PHASE2_5_KALI_ENVIRONMENT_REPORT.md](PHASE2_5_KALI_ENVIRONMENT_REPORT.md).
 * **Phase 3:** six insider-attack scripts on Kali (exfiltration, privilege escalation, SQL injection, out-of-role snooping, credential misuse, sabotage/log tampering). Each impersonates a real employee device IP from `Device_Profiles`, writes the behavioural schema to `runtime/lab/telemetry.jsonl`, and keeps volume and ports close to normal (stealth requirement).
 * **Phase 4:** active defense. When an employee's risk crosses the data-derived high boundary, respond (block IP / end session). The trigger is the score, never a rule.

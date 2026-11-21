@@ -17,8 +17,12 @@ The collector refuses to store unscored events. If `models/ai_engine/insider_bra
 `models/ai_engine/directory.json` is missing or cannot be loaded, the collector health shows the error and
 ingestion waits.
 
-Check that `requirements.txt` versions are installed: the artifact is a pickle tied to the pandas and scikit-learn
-versions it was trained with. Alternatively, retrain with `.venv/bin/python -m monitor.brain.train` (this needs the
+Check that `requirements.txt` versions are installed (`.venv/bin/pip install -r requirements.txt`). The artifact
+stores its fitted state as numpy arrays and plain Python containers, so it loads on any pandas version; it does embed
+a fitted scikit-learn pipeline, so scikit-learn must match the pinned version. Errors such as
+`No module named 'sklearn'` mean the virtual environment was not installed from `requirements.txt`. Models trained
+before Phase 2.5 pickled pandas objects and fail on pandas 2 with
+`NotImplementedError: ... NDArrayBacked.__setstate__`; the committed model no longer has this problem. Alternatively, retrain with `.venv/bin/python -m monitor.brain.train` (this needs the
 dataset workbook in `data/`). Restart the collector after changing the model; the dashboard shows the model version
 in the collector banner.
 

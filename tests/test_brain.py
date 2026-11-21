@@ -104,8 +104,9 @@ class BrainTests(unittest.TestCase):
         baseline = self.brain.baseline_
         personal = baseline.transform(sample)
         swapped = sample.copy()
-        used = baseline.service_prob_.idxmax(axis=1)
-        swapped['destination_service'] = [next(s for s in SERVICES if baseline.service_prob_.at[e, s] == baseline.service_prob_.loc[e].min()) for e in swapped.employee_id]
+        used = [baseline.services_[j] for j in baseline.service_prob_.argmax(axis=1)]
+        least = {e: min(SERVICES, key=lambda s: baseline.service_probability(e, s)) for e in swapped.employee_id}
+        swapped['destination_service'] = swapped.employee_id.map(least)
         self.assertTrue((baseline.transform(swapped).emp_service_rarity.to_numpy() >= personal.emp_service_rarity.to_numpy() - 1e-9).all())
         self.assertTrue(len(used))
         unknown = sample.assign(employee_id='EMP-UNKNOWN')
@@ -201,3 +202,22 @@ class TelemetryDerivationTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ArtifactPortabilityTests(unittest.TestCase):
+    """The pickled model must not embed pandas objects (they break across pandas versions)."""
+
+    def test_fitted_brain_holds_no_pandas_objects(self):
+        from monitor.brain.runtime import pandas_references
+        events = synthetic_events(n_employees=10, per_employee=30)
+        train, calibration, _, _ = chronological_split(events)
+        brain = InsiderThreatBrain(n_estimators=20).fit(train).calibrate(calibration)
+        self.assertEqual(pandas_references(brain), [])
+
+    def test_committed_artifact_loads_and_holds_no_pandas_objects(self):
+        from monitor.brain.runtime import DEFAULT_MODEL, load_brain, pandas_references
+        if not DEFAULT_MODEL.is_file():
+            self.skipTest('model artifact not present')
+        brain = load_brain()
+        self.assertEqual(pandas_references(brain), [])
+        self.assertEqual(pandas_references(brain.baseline_), [])
