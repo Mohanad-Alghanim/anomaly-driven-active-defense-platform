@@ -28,6 +28,12 @@ MAX_BYTES = 10 * 1024 * 1024 * 1024  # schema sanity bound on a single transfer
 SCENARIOS = {}
 
 
+def now_ts():
+    """Current UTC epoch seconds (same basis the collector uses)."""
+    import time
+    return time.time()
+
+
 def register(scenario):
     SCENARIOS[scenario.key] = scenario
     return scenario

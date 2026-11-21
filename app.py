@@ -11,6 +11,7 @@ from monitor.demo import events as demo_events
 from monitor.views import active_ranking, collector_health, employee_events, snapshot, unattributed_events
 from monitor.lab_readiness import readiness
 from monitor.brain.explain import explain_employee
+from monitor.response import Responder, MODES
 
 LEVEL_BADGE = {'high': '🔴 HIGH', 'medium': '🟠 MEDIUM', 'low': '🟢 LOW'}
 
@@ -101,6 +102,94 @@ def analysis_panel(engine, employee, zone):
                      hide_index=True, width='stretch')
 
 
+MODE_LABEL = {'auto': 'Automatic', 'manual': 'Manual (analyst approves)', 'disabled': 'Disabled (kill-switch)'}
+
+
+def response_write(path, action):
+    """Run a response mutation on a short-lived writable engine, then refresh."""
+    writable = Engine(path, settings)
+    try:
+        action(Responder(writable))
+    finally:
+        writable.close()
+
+
+def response_section(engine, path, directory, brain, zone):
+    responder = Responder(engine, directory)
+    mode = responder.mode()
+    active = responder.active_responses()
+    st.subheader('Active defense — automatic response')
+    high = brain.employee_boundaries_['high']
+    st.caption(f"Score-triggered: a response fires when an employee's **peak** risk crosses the high boundary "
+               f"({high:.4f}); medium never triggers. Actions are loopback-only and reversible: **block_ip** (the lab "
+               "refuses that device IP and the collector marks its telemetry BLOCKED) and **end_session**. "
+               "The trigger is the model's score, not a rule.")
+
+    top = st.columns([2, 1, 1])
+    choice = top[0].radio('Auto-response mode', list(MODES), index=list(MODES).index(mode),
+                          format_func=MODE_LABEL.get, horizontal=True, key='resp_mode')
+    if choice != mode:
+        response_write(path, lambda r: r.set_mode(choice))
+        st.rerun()
+    if top[1].button('⛔ Kill-switch', help='Disable all automatic response immediately', disabled=mode == 'disabled'):
+        response_write(path, lambda r: r.set_mode('disabled'))
+        st.rerun()
+    pending = [c for c in responder.candidates(brain)]
+    if top[2].button(f'Respond to all HIGH ({len(pending)})', disabled=not pending or mode == 'disabled',
+                     help='Apply block_ip + end_session to every employee over the high boundary'):
+        response_write(path, lambda r: [r.respond(c['employee_id'], brain=r.engine.brain, peak_risk=c['peak_risk'],
+                                                   created_by='analyst') for c in r.candidates(r.engine.brain)])
+        st.rerun()
+
+    if mode == 'manual' and pending:
+        st.markdown('**Awaiting analyst decision — employees over the high boundary:**')
+        for c in pending:
+            cols = st.columns([3, 2, 1])
+            person = directory.employee(c['employee_id'])
+            cols[0].write(f"{c['employee_id']} — {person.get('employee_name','')} ({person.get('department','')})")
+            cols[1].write(f"peak {c['peak_risk']:.3f} · {c['source_ip'] or 'no device IP'}")
+            if cols[2].button('Respond', key=f"respond_{c['employee_id']}"):
+                response_write(path, lambda r, e=c['employee_id'], pk=c['peak_risk']:
+                               r.respond(e, brain=r.engine.brain, peak_risk=pk, created_by='analyst'))
+                st.rerun()
+
+    if active:
+        st.markdown('**Active responses** (reversible):')
+        for r in active:
+            cols = st.columns([3, 3, 1])
+            person = directory.employee(r['employee_id'])
+            acts = ', '.join(json.loads(r['actions']))
+            cols[0].write(f"🛡️ {r['employee_id']} — {person.get('employee_name','')} · `{r['source_ip']}`")
+            cols[0].caption(f"{acts} · by {r['created_by']} · {stamp(r['created_ts'], zone)}")
+            cols[1].caption(r['reason'] or '')
+            if cols[2].button('Unblock / Reinstate', key=f"revert_{r['id']}"):
+                response_write(path, lambda rr, rid=r['id']: rr.revert(rid))
+                st.rerun()
+    else:
+        st.caption('No active responses.')
+
+    history = responder.all_responses()
+    if history:
+        with st.expander(f'Response history ({len(history)}) and audit log'):
+            frame = pd.DataFrame(history)
+            frame['When'] = [stamp(t, zone) if pd.notna(t) else '' for t in frame.created_ts]
+            frame['Reverted'] = [stamp(t, zone) if pd.notna(t) else '' for t in frame.reverted_ts]
+            frame['Actions'] = frame.actions.map(lambda a: ', '.join(json.loads(a)))
+            st.dataframe(frame[['When', 'employee_id', 'source_ip', 'Actions', 'peak_risk', 'reason',
+                                'created_by', 'status', 'Reverted', 'reverted_by']].rename(
+                columns={'employee_id': 'Employee', 'source_ip': 'IP', 'peak_risk': 'Peak risk',
+                         'reason': 'Reason', 'created_by': 'By', 'status': 'Status', 'reverted_by': 'Reverted by'}),
+                hide_index=True, width='stretch')
+            audit = responder.audit_log()
+            if audit:
+                adf = pd.DataFrame(audit)
+                adf['When'] = [stamp(t, zone) for t in adf.ts]
+                st.markdown('**Audit log**')
+                st.dataframe(adf[['When', 'action', 'employee_id', 'actor', 'detail']].rename(
+                    columns={'action': 'Action', 'employee_id': 'Employee', 'actor': 'Actor', 'detail': 'Detail'}),
+                    hide_index=True, width='stretch')
+
+
 @st.fragment(run_every=3)
 def dashboard():
     path = data / ('demo.db' if mode == 'Demonstration' else 'live.db')
@@ -178,6 +267,10 @@ def dashboard():
                                        format_func=lambda e: f"{e} — {directory.employee(e).get('employee_name', '')}")
             st.divider()
             analysis_panel(engine, next(e for e in ranked if e['employee_id'] == employee_id), zone)
+
+        if mode == 'Live monitoring':
+            st.divider()
+            response_section(engine, path, directory, brain, zone)
 
         st.divider()
         left, right = st.columns(2)

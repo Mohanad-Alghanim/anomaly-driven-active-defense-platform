@@ -109,12 +109,19 @@ class Engine:
             employee_id TEXT PRIMARY KEY, weighted_sum REAL, weight REAL, last_ts REAL, risk REAL, level TEXT,
             risk_percentile REAL, peak_risk REAL, peak_ts REAL, max_score REAL, events INTEGER, high_events INTEGER,
             updated_ts REAL, model_version TEXT);
+        CREATE TABLE IF NOT EXISTS responses(
+            id TEXT PRIMARY KEY, employee_id TEXT, source_ip TEXT, actions TEXT, reason TEXT, peak_risk REAL,
+            level TEXT, created_ts REAL, created_by TEXT, status TEXT, reverted_ts REAL, reverted_by TEXT,
+            model_version TEXT);
+        CREATE TABLE IF NOT EXISTS response_audit(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, action TEXT, employee_id TEXT, actor TEXT, detail TEXT);
         ''')
         # Additive migration preserves earlier project databases and their history.
         added = [('dst_ip', 'TEXT'), ('dst_host', 'TEXT'), ('source_port', 'INTEGER'), ('processed_ts', 'REAL'),
                  ('employee_id', 'TEXT'), ('device_id', 'TEXT'), ('protocol', 'TEXT'), ('dst_service', 'TEXT'),
                  ('bytes_in', 'REAL'), ('bytes_out', 'REAL'), ('response_ms', 'REAL'), ('prev_hour', 'INTEGER'),
-                 ('features', 'TEXT'), ('score', 'REAL'), ('level', 'TEXT'), ('model_version', 'TEXT')]
+                 ('features', 'TEXT'), ('score', 'REAL'), ('level', 'TEXT'), ('model_version', 'TEXT'),
+                 ('enforced', 'INTEGER')]
         for name, datatype in added:
             columns = {row[1] for row in self.db.execute('PRAGMA table_info(events)')}
             if name not in columns:
@@ -151,6 +158,33 @@ class Engine:
     @property
     def model_version(self):
         return getattr(self.brain, 'version_', 'insider_brain:unversioned')
+
+    @property
+    def enforcement_path(self):
+        """Where active-defense enforcement (blocked IPs / ended sessions) is stored.
+
+        The same file the loopback lab target honours; the collector reads it to mark
+        telemetry that arrives from a source the analyst (or the auto-responder) has blocked.
+        """
+        lab = self.c.get('lab')
+        if lab and lab.get('runtime'):
+            base = Path(lab['runtime'])
+        elif self.database_path is not None:
+            base = self.database_path.parent.parent / 'runtime' / 'lab'
+        else:
+            return None
+        return base / 'enforcement.json'
+
+    def enforcement(self):
+        path = self.enforcement_path
+        if not path or not path.is_file():
+            return {'blocked_ips': {}, 'ended_sessions': {}}
+        try:
+            data = json.loads(path.read_text())
+            return {'blocked_ips': dict(data.get('blocked_ips') or {}),
+                    'ended_sessions': dict(data.get('ended_sessions') or {})}
+        except (OSError, ValueError):
+            return {'blocked_ips': {}, 'ended_sessions': {}}
 
     def close(self):
         self.db.close()
@@ -235,12 +269,22 @@ class Engine:
                 scores = brain.score_events(features)
                 levels = brain.event_levels(scores)
                 inputs = brain.matrix(features)
+                enf = self.enforcement()
+                blocked_ips, ended = set(enf['blocked_ips']), set(enf['ended_sessions'])
+                risk_rows, risk_scores = [], []
                 for (i, rowid), e, score, level, p, record in zip(inserted, rows, scores, levels, prev, inputs.to_dict('records')):
                     record = {k: (None if isinstance(v, float) and np.isnan(v) else v) for k, v in record.items()}
-                    self.db.execute('UPDATE events SET score=?, level=?, status=?, prev_hour=?, features=? WHERE rowid=?',
-                                    (float(score), str(level), str(level).upper(), int(p), json.dumps(record), rowid))
-                    results[i] = dict(score=float(score), level=str(level), employee_id=e['employee_id'])
-                self._update_risk(rows, scores, brain, version)
+                    # An active block prevents the action: the attempt is recorded for audit but
+                    # does not raise the employee's risk further.
+                    enforced = int(e['source_ip'] in blocked_ips or e['employee_id'] in ended)
+                    status = 'BLOCKED' if enforced else str(level).upper()
+                    self.db.execute('UPDATE events SET score=?, level=?, status=?, prev_hour=?, features=?, enforced=? WHERE rowid=?',
+                                    (float(score), str(level), status, int(p), json.dumps(record), enforced, rowid))
+                    results[i] = dict(score=float(score), level=str(level), employee_id=e['employee_id'], enforced=bool(enforced))
+                    if not enforced:
+                        risk_rows.append(e)
+                        risk_scores.append(score)
+                self._update_risk(risk_rows, risk_scores, brain, version)
                 last = max(rows, key=lambda r: r['ts'])
                 self.db.execute('INSERT OR REPLACE INTO state VALUES (?,?)',
                                 ('last_event', json.dumps({'event_ts': last['ts'], 'processed_ts': now()})))
@@ -265,10 +309,12 @@ class Engine:
             peak, peak_ts = (row['peak_risk'], row['peak_ts']) if row else (None, None)
             if peak is None or risk > peak:
                 peak, peak_ts = risk, rows[i]['ts']
+            prior_max = row['max_score'] if row and row['max_score'] is not None else float('-inf')
+            prior_events = row['events'] if row and row['events'] is not None else 0
+            prior_high = row['high_events'] if row and row['high_events'] is not None else 0
             self.db.execute('INSERT OR REPLACE INTO employee_risk VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', (
                 emp, state.weighted_sum, state.weight, state.last_ts, risk, level, percentile, peak, peak_ts,
-                max(float(scores[i]), row['max_score'] if row else float('-inf')),
-                (row['events'] if row else 0) + 1, (row['high_events'] if row else 0) + high, now(), version))
+                max(float(scores[i]), prior_max), prior_events + 1, prior_high + high, now(), version))
 
     def rows(self, table):
         if table not in ('events', 'employee_risk'):

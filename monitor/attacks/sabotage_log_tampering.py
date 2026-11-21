@@ -40,8 +40,16 @@ def action(args):
     stamp = datetime.now(timezone.utc).isoformat()
     with target.open('a') as handle:
         handle.write(f'audit_retention=0  # tampered {stamp}\n')
-    return (f'appended a tamper line to {target.name}; the collector will flag an '
-            'unauthorised content change on its next poll')
+    # Record who tampered (lab stand-in for file-audit) so the collector attributes the
+    # integrity-change event to this employee instead of leaving it unattributed.
+    try:
+        source_ip = base.device_ip(base.load_directory(), getattr(args, "employee", None))
+        sidecar = Path(str(target) + '.actor.json')
+        sidecar.write_text(json.dumps(dict(source_ip=source_ip, employee_id=getattr(args, 'employee', None), ts=base.now_ts())))
+    except (SystemExit, OSError):
+        source_ip = None
+    return (f'appended a tamper line to {target.name} (actor {source_ip}); the collector will flag an '
+            'unauthorised content change, now attributed to the employee')
 
 
 def build(directory, source_ip, person, args):

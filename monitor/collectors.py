@@ -13,6 +13,34 @@ def defaults(source):
     return {k: source[k] for k in keys if k in source}
 
 
+ACTOR_WINDOW_SECONDS = 600  # a fresh audit record attributes the change; a stale one is ignored
+
+
+def actor_sidecar(path):
+    """Path of the lab audit record that names who last wrote a watched file."""
+    return Path(str(path) + '.actor.json')
+
+
+def attribution(path):
+    """Read and consume the audit sidecar for a watched file; returns a source_ip if fresh.
+
+    The sidecar is the lab's stand-in for file-audit (auditd): the actor records their
+    device IP when they modify the file, so the integrity-change event is attributed to
+    the employee instead of being left unattributed. Lab-only; the IP is validated and
+    attributed through the directory exactly like any other event.
+    """
+    sidecar = actor_sidecar(path)
+    try:
+        record = json.loads(sidecar.read_text())
+        sidecar.unlink()
+    except (OSError, ValueError):
+        return {}
+    source_ip = record.get('source_ip')
+    if source_ip and now() - float(record.get('ts', 0)) <= ACTOR_WINDOW_SECONDS:
+        return dict(source_ip=source_ip)
+    return {}
+
+
 def collect_files(engine):
     statuses = []
     for source in engine.c['sources']:
@@ -84,7 +112,11 @@ def collect_files(engine):
                 digest = digest.hexdigest()
             old = engine.state(key)
             if old and old != digest:
-                engine.process(dict(ts=now(), kind='file_change', source=str(path), dst_host=str(path), message=f'Content changed: {path}', authorized=digest == str(entry.get('authorized_sha256', '')).lower()))
+                event = dict(ts=now(), kind='file_change', source=str(path), dst_host=str(path),
+                             message=f'Content changed: {path}',
+                             authorized=digest == str(entry.get('authorized_sha256', '')).lower())
+                event.update(attribution(path))   # attribute the change to its actor when the lab recorded one
+                engine.process(event)
             engine.set_state(key, digest)
             status.update(available=True, status='Monitoring content; baseline recorded')
         except (OSError, ValueError) as exc:

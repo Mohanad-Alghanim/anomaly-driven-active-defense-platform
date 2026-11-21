@@ -33,9 +33,19 @@ def _web_port():
 def action(args):
     port = _web_port()
     url = f'http://127.0.0.1:{port}/search?q=' + urllib.parse.quote(INJECTION)
+    # Declare the impersonated device IP so the lab can honour an active-defense block.
     try:
-        with urllib.request.urlopen(url, timeout=3) as response:
+        source_ip = base.device_ip(base.load_directory(), getattr(args, "employee", None))
+    except SystemExit:
+        source_ip = None
+    request = urllib.request.Request(url, headers={'X-Lab-Source': source_ip} if source_ip else {})
+    try:
+        with urllib.request.urlopen(request, timeout=3) as response:
             payload = json.loads(response.read().decode())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            return f'BLOCKED by active defense — the lab refused the request from {source_ip} (403)'
+        return f'lab returned HTTP {exc.code}; telemetry still emitted'
     except (urllib.error.URLError, OSError, ValueError) as exc:
         return f'lab web target not reachable on 127.0.0.1:{port} ({exc}); telemetry still emitted'
     results = payload.get('results', [])

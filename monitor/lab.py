@@ -50,6 +50,15 @@ class Catalog:
         self.db.close()
 
 
+def blocked_sources(p):
+    """Source IPs the active-defense layer has blocked (read fresh each request)."""
+    path = p['runtime'] / 'enforcement.json'
+    try:
+        return set((json.loads(path.read_text()).get('blocked_ips') or {}).keys())
+    except (OSError, ValueError):
+        return set()
+
+
 def handler_for(p, catalog):
     class Handler(BaseHTTPRequestHandler):
         server_version='ActiveDefenseLab/1'
@@ -62,8 +71,13 @@ def handler_for(p, catalog):
         def do_GET(self):
             try:
                 parts=urlsplit(self.path)
+                # Active defense: the lab honours the enforcement blocklist. A request that
+                # declares a blocked source IP (X-Lab-Source) is refused, loopback-only.
+                claimed=self.headers.get('X-Lab-Source')
                 if len(self.path)>2048:
                     status,payload=414,dict(error='Request too long')
+                elif claimed and claimed in blocked_sources(p):
+                    status,payload=403,dict(error='Source blocked by active defense')
                 elif parts.path=='/health':
                     status,payload=200,dict(target='active-defense-loopback-lab',status='RUNNING')
                 elif parts.path=='/search':
@@ -91,7 +105,7 @@ def handler_for(p, catalog):
     return Handler
 
 
-def run(root, stop=None):
+def run(root, stop=None, port=WEB_PORT):
     if os.geteuid()==0:
         raise RuntimeError('Lab targets must run as the normal Kali user')
     os.umask(0o077)
@@ -108,7 +122,7 @@ def run(root, stop=None):
         catalog=Catalog()
         web=None
         try:
-            web=HTTPServer(('127.0.0.1',WEB_PORT),handler_for(p,catalog))
+            web=HTTPServer(('127.0.0.1',port),handler_for(p,catalog))
             web.timeout=0.5
             while not stop.is_set():
                 health.update(status='RUNNING',heartbeat=now(),components=dict(
@@ -130,10 +144,11 @@ def run(root, stop=None):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root',type=Path,default=Path(__file__).resolve().parents[1])
+    parser.add_argument('--port',type=int,default=WEB_PORT,help='Loopback port for the lab web target')
     args=parser.parse_args()
     stop=threading.Event()
     for sig in (signal.SIGINT,signal.SIGTERM): signal.signal(sig,lambda *_:stop.set())
-    run(args.root,stop)
+    run(args.root,stop,args.port)
 
 
 if __name__=='__main__':

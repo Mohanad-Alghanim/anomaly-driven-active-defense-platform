@@ -12,11 +12,21 @@ from .collectors import collect_files
 from .journal import collect_journal
 
 
+def _auto_respond(engine):
+    """Apply score-triggered responses. Never let a response failure break collection."""
+    try:
+        from .response import Responder
+        Responder(engine).evaluate(engine.brain)
+    except Exception:
+        pass
+
+
 def cycle(engine, journal_reader=None):
     statuses = []
     try:
         statuses.append(collect_journal(engine, journal_reader) if journal_reader else collect_journal(engine))
         statuses.extend(collect_files(engine))
+        _auto_respond(engine)
         status = 'RUNNING' if all(s['available'] and not s.get('rejected') for s in statuses if s.get('enabled', True)) else 'DEGRADED'
         health = dict(status=status, model_version=engine.model_version, heartbeat=now(), pid=os.getpid(), sources=statuses, last_event=json.loads(engine.state('last_event') or 'null'))
     except StorageFull as exc:
