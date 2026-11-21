@@ -1,40 +1,35 @@
 # Development of an Anomaly-Driven Active Defense Platform Against Unauthorized Access and Credential Attacks
 
-A local Kali Linux SOC dashboard with an independent background collector, SQLite history, deterministic detection categories, and self-contained loopback lab targets. Codex, AI services, paid APIs and external monitoring platforms are not required for operation.
+A local Kali Linux SOC platform for **insider-threat detection with unsupervised AI**. A background collector reads
+telemetry and stores it in SQLite. Every event is scored by an Isolation Forest trained on **normal behaviour only**,
+and the dashboard ranks **employees** by a rolling risk score. Selecting an employee shows which of their own
+behaviour patterns deviated, and by how much.
 
-**Latest SSH correction:** the full real-lab verification passed five categories; SSH remained UNVERIFIED after four real failures because OpenSSH penalized the source and dropped the fifth connection. The isolated port-2222 config now uses `PerSourcePenalties no` (installed OpenSSH 10.5p1). The runner allows up to ten clients but requires five new native failures, five matching normalized SQLite events and a new HIGH/ABNORMAL alert in the dashboard read model. The threshold stays five in 60 seconds. Other detection logic and the five verified results are preserved. Apply/reload only the isolated daemon with `.venv/bin/python -m monitor.ssh_lab --apply`, then rerun `.venv/bin/python -m monitor.lab_test ssh`. The development sandbox blocked reload/live SSH validation, so the corrected live result is still **UNVERIFIED**.
+There are **no detection rules and no hand-written thresholds**. Low/medium/high are quantiles (P95/P99) of the score
+distribution of independent normal behaviour, fixed when the model is trained. A high score is a deviation that
+requires investigation, not proof of intent.
 
-## Use on this Kali desktop
+![Employee risk ranking](docs/screenshots/phase2_home_employee_ranking.png)
 
-The existing dashboard and collector services remain in place. The new lab service and graphical controls are prepared, not enabled by this development session.
+## How it works
 
-1. Open **Active Defense Platform — Start Monitoring**, and approve the one-time confirmation for loopback listeners and login startup.
-2. Open **Active Defense Platform — Component Health**, then **Anomaly-Driven Active Defense Platform** at **http://127.0.0.1:8501**. Refresh an existing browser after the upgrade.
-3. Use a separate normal-user terminal for the bounded commands in [TESTING_GUIDE.md](TESTING_GUIDE.md).
-4. Use **Active Defense Platform — Stop Monitoring** or **Active Defense Platform — Restart Monitoring** as needed. Closing Firefox does not stop collection. VM shutdown stops the lab; enabled user services start at next login.
-
-No collector configuration, log import, firewall logging, target installation or rule setup is required before individual tests. One-time provisioning has already merged the native sources into private `config.local.json`, preserving existing settings and backing it up. The existing host SSH service is untouched. No new system package, firewall rule, capture mechanism, group membership or privileged host configuration was changed.
-
-## Architecture and targets
-
-| Category | Actual local target / telemetry | Default rule |
+| Step | Where | What |
 | --- | --- | --- |
-| SSH Brute Force | Isolated OpenSSH `127.0.0.1:2222`; private auth log; existing host Journal also retained | 5 failures/IP in 60 s |
-| Port Scanning | TCP accept listeners `127.0.0.1:9100–9119`; actual accepted socket endpoints | 15 distinct ports/IP in 60 s |
-| SQL Injection | Instrumented HTTP `/search` at `127.0.0.1:8088`; real disposable SQLite query and access log | One SQL pattern |
-| Denial of Service (DoS) | HTTP `/health` at `127.0.0.1:8088`; real request access log | 50 requests/IP in 10 s |
-| Unauthorized File Modification | `runtime/lab/watched/settings.txt`; actual SHA-256 content changes | One unapproved change |
-| Suspicious Privilege Escalation | Unprivileged OS capability-boundary probe; actual denied `CAP_SETUID` request and native audit log | One predefined denied-privilege event |
+| Collect | `monitor/collectors.py`, `journal.py`, `adapters.py`, `worker.py` | Bounded incremental reads of JSONL behavioural telemetry, HTTP access logs, netfilter logs, the systemd Journal and watched files; durable cursors; one writer. |
+| Attribute | `monitor/brain/telemetry.py` | `source_ip → device → employee` via `models/ai_engine/directory.json`. Unknown sources are stored and scored but not ranked. |
+| Derive | `monitor/brain/telemetry.py` | The dataset's features: local time (cyclic), weekend, scheduled hours, log bytes/latency, service/protocol, events from the same source in the previous hour. They match the training workbook to floating-point precision. |
+| Score | `monitor/core.py` → `monitor/brain` | Personal deviation from the employee's own baseline, plus Isolation Forest anomaly score and data-derived level per event. |
+| Aggregate | `monitor/brain/risk.py` | Employee risk = time-decayed mean of recent event scores (half-life 24 h). Event counts do not raise risk. |
+| Explain | `monitor/brain/explain.py`, `app.py` | Plain-language reasons: which personal features deviated and by how many standard deviations. |
 
-The main dashboard/collector are normal-user processes. One lightweight lab process manages the loopback web/TCP targets and an unprivileged OpenSSH child. It does not run test traffic automatically. The SSH configuration disables PAM, forwarding, root login and useful shell access; its allowed test username does not exist. Own host keys/logs stay in private ignored `runtime/lab/`. Host SSH on port 22 is not modified.
+Model results, including the full model next to the artifact-free floor, are in
+[docs/PHASE1_BRAIN_REPORT.md](docs/PHASE1_BRAIN_REPORT.md). The Phase 2 integration is described in
+[docs/PHASE2_INTEGRATION_REPORT.md](docs/PHASE2_INTEGRATION_REPORT.md), and the overall plan in
+[docs/MIGRATION_PLAN.md](docs/MIGRATION_PLAN.md).
 
-The deliberately unsafe SQL query operates only on a disposable in-memory catalog with two non-sensitive rows. Query length/steps are limited; multiple statements and extension loading are not enabled. The SSH test allows at most ten clients and stops at five confirmed authentication failures. The rate test is capped at 64 small sequential requests. The port test uses at most twenty TCP connections. The capability probe refuses root or an already privileged process and records a genuine OS denial; it does not weaken host security or claim a successful exploit.
+## Install
 
-Telemetry is generated by actual application, socket, filesystem or permission-boundary activity. JSONL is the serialization format for native TCP/privilege audit logs, not an instruction to manually manufacture events. Demonstration data remains in a separate `demo.db` and is never used as proof of live detection.
-
-## Fresh installation or repeatable deployment
-
-Python 3.10+ is required; locally tested with Python 3.14 / Streamlit 1.66.1. Kali binaries OpenSSH server/client, ssh-keygen and sshpass are required for the isolated SSH path and bounded test wrapper; all were found here. curl/nmap are optional command alternatives and were also found. `/run/sshd` exists here. Missing host packages/directories on another machine need separate administrator-approved setup; the installer never silently elevates privileges.
+Python 3.11+ is required.
 
 ```bash
 git clone https://github.com/Mohanad-Alghanim/anomaly-driven-active-defense-platform.git
@@ -45,38 +40,41 @@ python3 -m venv .venv
 .venv/bin/python -m monitor.install --prepare-lab
 ```
 
-Then use the graphical Start control and approve activation. An existing installation with repaired, working services should use **only `--prepare-lab`** for this lab upgrade: it preserves the installed collector/dashboard units, database and original source definitions. Future full preparation now generates an **unquoted `WorkingDirectory`**, fixing the reported regression. Generated files are structurally validated before installation, with regression tests for all three units and paths containing spaces/percent signs.
+Then use the graphical **Active Defense Platform — Start Monitoring** control and approve activation. The dashboard is
+at **http://127.0.0.1:8501**. Do not run the dashboard or lab as root.
 
-Preparation alone starts no listener. Graphical confirmation uses Zenity or tkinter in the normal desktop session. Existing `config.local.json` detector thresholds are preserved; bounded wrappers refuse thresholds exceeding the lab's traffic/port limits rather than launch larger tests. New keys/files are private, and credentials, databases, logs and backups are ignored by Git. Do not run the dashboard/lab as root.
-
-## Verification and health
-
-The dashboard has a detection and monitoring readiness panel. **RUNNING target**, **AVAILABLE source**, and **PIPELINE VERIFIED** are separate facts. A readable empty file, an old alert, successful unit tests or demo output cannot mark a network target verified. Stopped/stale targets remain not ready. The new privilege rule requires one collector restart; the runner checks its reported rule version before testing that production path.
+The trained model, the organisation directory and a demo replay are committed. Retraining needs the dataset workbook
+in `data/` (Git-ignored):
 
 ```bash
-cd /home/kali/anomaly-driven-active-defense-platform
-.venv/bin/python -m monitor.lab_test verify
+.venv/bin/python -m monitor.brain.train
 ```
 
-This explicitly performs benign controls and all six bounded real tests against the already approved running lab. Each success requires a newly persisted alert from the **exact native lab source** and presence in the dashboard read model. Private per-category evidence goes to `runtime/lab/validation.json`. Inspect Firefox too: a read-model check does not itself validate browser visuals. Commands and failure recovery for each category are fully specified in [TESTING_GUIDE.md](TESTING_GUIDE.md).
+## Lab
 
-Automated suite:
+The loopback lab provides:
+* an Internal Web target at `127.0.0.1:8088`, with a real access log;
+* a watched file;
+* a **telemetry inbox**, `runtime/lab/telemetry.jsonl`, where the Phase 3 insider-scenario scripts will write events in the behavioural schema.
+
+```json
+{"ts": "2026-11-20T09:15:00+03:00", "source_ip": "10.200.0.10", "destination_ip": "10.10.1.20",
+ "destination_port": 445, "protocol": "TCP", "bytes_in": 1500, "bytes_out": 600, "response_time_ms": 42,
+ "kind": "file_read", "message": "free text"}
+```
+
+`destination_service` and `protocol` are filled from the server directory when omitted. See [TESTING_GUIDE.md](TESTING_GUIDE.md).
+
+## Tests
 
 ```bash
-.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m pytest -q
 ```
-
-Current migration validation: **60 passed, zero skipped**, including the systemd parser check and explicitly enabled bounded live network verification. All detection paths produced new persisted alerts. Firefox confirmed the academic heading, short tab title and responsive wrapping. See [migration validation](docs/REBRANDING_VALIDATION.md).
 
 ## Operation and reliability
 
-- Two-second collection and three-second dashboard refresh. Collection is independent of the browser and persists Journal cursors, file offsets, hashes and heartbeats.
-- SQLite WAL, busy timeout, one collector lock, transactional rules and deterministic event identities support concurrent reads and restart replay. Existing databases migrate additively.
-- Threshold alerts have per-category/IP cooldowns; repeated matching events still remain ABNORMAL. Earlier contributors remain NORMAL until a rule triggers. A rule match is an indicator, not proof of an attack.
-- Source/destination fields, event/detection timestamps, status, severity, rule, explanation and recommendations remain available in historical alerts and event details.
-- Default 200,000-event / approximately 256 MiB database limits pause collection visibly instead of silently deleting history. Archive deliberately when needed. Native target logs rotate at 8 MiB with three retained generations; collector rotation handling is bounded rather than enterprise-lossless shipping. Very fast rotation can lose an unread old tail; normal bounded tests are far below rotation size.
-- Target CPU/memory/start-rate limits, server request timeouts, process locks and fail-fast port binding prevent uncontrolled target growth. A port conflict does not terminate unrelated processes or silently change the documented endpoint.
-- User login startup uses existing user systemd, without linger or root dashboard execution. Logout normally stops user services; no monitoring is required while powered off.
-- Ordinary sudo/su Journal sessions remain NORMAL unless a predefined suspicious pattern matches. Local Journal describes Kali, not an arbitrary remote test target. Optional external log adapters remain supported; the bundled lab does not require them.
-
-See [troubleshooting](docs/TROUBLESHOOTING.md) for service recovery, the WorkingDirectory regression, port conflicts, stale collector state, duplicate suppression and source errors. Advanced external-source notes remain in [docs/LAB_TELEMETRY.md](docs/LAB_TELEMETRY.md).
+- **Timing.** Collection runs every two seconds and the dashboard refreshes every three. Collection is independent of the browser.
+- **Persistence.** Journal cursors, file offsets, hashes and heartbeats are persisted. Events are stored and scored before a cursor moves, so a crash replays and never skips.
+- **Storage.** SQLite runs in WAL mode with one collector lock and deterministic event identities. Older databases migrate additively; historical rows and old rule-era alert tables are preserved but no longer written.
+- **Capacity.** The default limits (200,000 events, about 256 MiB) pause collection visibly instead of deleting history.
+- **Model identity.** The collector reports the model version (a hash of the artifact) in its health. Changing the model requires restarting the collector.
