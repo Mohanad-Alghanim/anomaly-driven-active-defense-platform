@@ -28,6 +28,54 @@ def employee_table(engine):
     return [dict(row) for row in engine.db.execute('SELECT * FROM employee_risk ORDER BY risk DESC, employee_id')]
 
 
+def active_ranking(engine, brain, cutoff):
+    """Employees active since `cutoff`, ranked by the PEAK rolling risk they reached
+    inside the window (then by current risk).
+
+    An employee who spiked and then went quiet keeps a high peak and stays near the
+    top, even though their current (decayed) risk has fallen back. Current risk and the
+    peak's time are reported alongside. Rolling risk is replayed from the stored event
+    scores over each active employee's full history, so current risk matches the live
+    employee_risk table; only events inside the window contribute to the window peak.
+    """
+    if not _has_table(engine, 'employee_risk'):
+        return []
+    recent = [r[0] for r in engine.db.execute(
+        'SELECT DISTINCT employee_id FROM events WHERE ts>=? AND employee_id IS NOT NULL AND score IS NOT NULL', (cutoff,))]
+    if not recent:
+        return []
+    from .brain.risk import RiskState
+    half_life = brain.half_life_seconds
+    high_boundary = brain.boundaries_['high']
+    marks = ','.join('?' * len(recent))
+    rows = engine.db.execute(
+        f'SELECT employee_id, ts, score FROM events WHERE employee_id IN ({marks}) AND score IS NOT NULL '
+        'ORDER BY ts, rowid', recent).fetchall()
+    states, agg = {}, {}
+    for emp, ts, score in rows:
+        risk = states.setdefault(emp, RiskState()).update(ts, score, half_life)
+        a = agg.get(emp)
+        if a is None:
+            a = agg[emp] = dict(peak_risk=None, peak_ts=None, risk=risk, last_ts=ts, events=0, high_events=0, max_score=score)
+        a['risk'], a['last_ts'] = risk, ts
+        if ts >= cutoff:
+            a['events'] += 1
+            a['high_events'] += int(score >= high_boundary)
+            a['max_score'] = max(a['max_score'], score)
+            if a['peak_risk'] is None or risk > a['peak_risk']:
+                a['peak_risk'], a['peak_ts'] = risk, ts
+    out = []
+    for emp, a in agg.items():
+        peak = a['peak_risk'] if a['peak_risk'] is not None else a['risk']
+        out.append(dict(
+            employee_id=emp, risk=a['risk'], level=str(brain.employee_levels([a['risk']])[0]),
+            risk_percentile=float(brain.employee_percentile([a['risk']])[0]),
+            peak_risk=peak, peak_level=str(brain.employee_levels([peak])[0]), peak_ts=a['peak_ts'],
+            last_ts=a['last_ts'], events=a['events'], high_events=a['high_events'], max_score=a['max_score']))
+    out.sort(key=lambda e: (e['peak_risk'], e['risk']), reverse=True)
+    return out
+
+
 def snapshot(engine, cutoff, limit=500):
     """Window summary: scored-event counts by level, timeline and recent elevated events."""
     columns = {row[1] for row in engine.db.execute('PRAGMA table_info(events)')}

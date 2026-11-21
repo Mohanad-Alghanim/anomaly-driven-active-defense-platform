@@ -11,7 +11,7 @@ import numpy as np
 
 from monitor.core import Engine, RETIRED_RULE_KEYS, collect, config, parse
 from monitor.demo import events as demo_events
-from monitor.views import employee_table, snapshot
+from monitor.views import active_ranking, employee_table, snapshot
 
 ROOT = Path(__file__).resolve().parents[1]
 DEVICE = '10.200.0.10'      # DEV0001-1 -> EMP0001
@@ -49,6 +49,31 @@ class MonitorTests(unittest.TestCase):
         features = json.loads(rows[0]['features'])
         self.assertEqual(set(features), set(brain.feature_names))
         self.assertNotIn('destination_port', features)
+
+    def test_active_ranking_keeps_a_calmed_spike_above_a_steady_employee(self):
+        """An employee who spiked then went quiet must outrank one with low, steady risk."""
+        base = 1794042000
+        # EMP0002 spikes early (an anomalous burst), then only normal activity after.
+        for i in range(8):
+            self.e.process(activity(base + 60 + i, ip=OTHER, destination_ip='10.20.1.20', destination_port=5432,
+                                    bytes_in=60000, bytes_out=9000, response_time_ms=1500))
+        for i in range(30):
+            self.e.process(activity(base + 7200 + i * 1800, ip=OTHER))   # back to normal, spread out
+        # EMP0001 is steadily normal throughout.
+        for i in range(30):
+            self.e.process(activity(base + i * 1800))
+        brain = self.e.brain
+        ranked = active_ranking(self.e, brain, base - 1)
+        self.assertEqual(ranked[0]['employee_id'], 'EMP0002')
+        self.assertGreater(ranked[0]['peak_risk'], ranked[0]['risk'])        # calmed: peak above current
+        self.assertEqual(ranked[0]['peak_level'], 'high')
+        current_order = active_ranking(self.e, brain, base - 1)
+        self.assertTrue(all(current_order[i]['peak_risk'] >= current_order[i + 1]['peak_risk']
+                            for i in range(len(current_order) - 1)))
+        # A window that starts after the spike no longer sees it as the peak.
+        later = active_ranking(self.e, brain, base + 3600)
+        emp2 = next(e for e in later if e['employee_id'] == 'EMP0002')
+        self.assertLess(emp2['peak_risk'], ranked[0]['peak_risk'])
 
     def test_unusual_behaviour_scores_higher_than_routine(self):
         base = 1794042000 + 3 * 3600   # 06:00 local (Riyadh) on a working day
@@ -214,7 +239,10 @@ class MonitorTests(unittest.TestCase):
             self.assertGreater(int(metrics['Employees monitored']), 100)
             self.assertGreater(int(metrics['High risk']), 0)
             ranking = next(frame.value for frame in app.dataframe if 'Percentile vs normal' in frame.value.columns)
-            self.assertTrue(np.all(np.diff(ranking['Risk'].to_numpy()) <= 0))
+            # Primary sort is the peak risk reached in the window (not current risk).
+            self.assertTrue(np.all(np.diff(ranking['Peak risk'].to_numpy()) <= 0))
+            self.assertIn('Current risk', ranking.columns)
+            self.assertIn('Peak time', ranking.columns)
             self.assertTrue(ranking['Level'].iloc[0].endswith('HIGH'))
             self.assertTrue(any(h.value.startswith('AI analysis — ' + ranking['Employee'].iloc[0]) for h in app.subheader))
             self.assertTrue(any('standard deviations' in m.value for m in app.markdown))

@@ -1,0 +1,68 @@
+"""SQL injection against the Database service, with a real loopback execution.
+
+Behavioural signal: a Database access with an abnormal response time and payload
+size, from an employee who does not normally query the database. Loud by design.
+
+Where the lab web target is running, the script also sends a genuine injection to
+its disposable in-memory SQLite catalog (http://127.0.0.1:<web_port>/search), proving
+real execution; that request is logged against 127.0.0.1 and is not attributed to the
+employee. The employee-attributed signal is the Database telemetry below.
+
+    python -m monitor.attacks.sql_injection --employee EMP0234
+"""
+import json
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+from . import base
+
+SERVICE = 'Database'
+INJECTION = "pencil' OR '1'='1"
+
+
+def _web_port():
+    try:
+        config = json.loads(Path(base.DEFAULT_CONFIG).read_text())
+        return int(config.get('lab', {}).get('web_port', 8088))
+    except (OSError, ValueError, TypeError):
+        return 8088
+
+
+def action(args):
+    port = _web_port()
+    url = f'http://127.0.0.1:{port}/search?q=' + urllib.parse.quote(INJECTION)
+    try:
+        with urllib.request.urlopen(url, timeout=3) as response:
+            payload = json.loads(response.read().decode())
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return f'lab web target not reachable on 127.0.0.1:{port} ({exc}); telemetry still emitted'
+    results = payload.get('results', [])
+    return (f"injected {INJECTION!r} into the lab catalog; it returned {len(results)} rows "
+            f"{results} (the ' OR '1'='1 made every row match — real SQLi executed)")
+
+
+def build(directory, source_ip, person, args):
+    ts = base.within_hours_ts(directory, person)
+    stamps = base.spaced(ts, args.count, args.interval)
+    # Slow, heavy responses typical of an injected query dumping a table.
+    return [base.record(source_ip, directory, SERVICE, ts=t, kind='db_query',
+                        bytes_in=256, bytes_out=180000, response_time_ms=4200,
+                        message="query with ' OR '1'='1 payload") for t in stamps]
+
+
+SCENARIO = base.Scenario(
+    key='sql_injection', title='SQL injection', service=SERVICE,
+    signal='abnormal response time and payload on an unusual Database access',
+    expected='HIGH', tone='loud', build=build, default_count=1, default_interval=90,
+    action=action)
+base.register(SCENARIO)
+
+
+def main(argv=None):
+    return base.run_scenario(SCENARIO, argv)
+
+
+if __name__ == '__main__':
+    main()

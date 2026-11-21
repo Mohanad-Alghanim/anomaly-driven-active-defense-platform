@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 from monitor.core import Engine, config, now
 from monitor.demo import events as demo_events
-from monitor.views import collector_health, employee_events, snapshot, unattributed_events
+from monitor.views import active_ranking, collector_health, employee_events, snapshot, unattributed_events
 from monitor.lab_readiness import readiness
 from monitor.brain.explain import explain_employee
 
@@ -24,8 +24,9 @@ st.title('Development of an Anomaly-Driven Active Defense Platform Against Unaut
 st.caption('LOCAL SOC • Unsupervised insider-threat detection • Risk levels derived from normal behaviour • '
            'A high score is a deviation requiring investigation, not proof of intent')
 mode = st.sidebar.radio('Data environment', ['Live monitoring', 'Demonstration'])
-hours = st.sidebar.selectbox('Event window (hours)', [1, 24, 168, 8760], index=2 if mode == 'Demonstration' else 1)
-st.sidebar.caption('Employee risk is rolling and independent of the event window. Refreshes every 3 seconds.')
+hours = st.sidebar.selectbox('Event window (hours)', [1, 24, 168, 8760], index=2)
+st.sidebar.caption('The ranking shows employees active in this window, by their peak risk within it. '
+                   'Default is 7 days. Refreshes every 3 seconds.')
 try:
     settings = config(os.environ.get('SIX_CONFIG', 'config.local.json'))
 except (ValueError, OSError) as exc:
@@ -54,10 +55,12 @@ def ranking_frame(employees, directory, zone):
     for rank, e in enumerate(employees, 1):
         person = directory.employee(e['employee_id'])
         rows.append({
-            'Rank': rank, 'Level': LEVEL_BADGE.get(e['level'], e['level']), 'Employee': e['employee_id'],
-            'Name': person.get('employee_name', ''), 'Department': person.get('department', ''),
-            'Job title': person.get('job_title', ''), 'Risk': round(e['risk'], 4),
-            'Percentile vs normal': round(e['risk_percentile'], 1), 'Peak risk': round(e['peak_risk'], 4),
+            'Rank': rank, 'Level': LEVEL_BADGE.get(e.get('peak_level', e['level']), e['level']),
+            'Employee': e['employee_id'], 'Name': person.get('employee_name', ''),
+            'Department': person.get('department', ''), 'Job title': person.get('job_title', ''),
+            'Peak risk': round(e['peak_risk'], 4), 'Peak time': stamp(e.get('peak_ts'), zone),
+            'Current risk': round(e['risk'], 4), 'Current level': LEVEL_BADGE.get(e['level'], e['level']),
+            'Percentile vs normal': round(e['risk_percentile'], 1),
             'Last activity': stamp(e['last_ts'], zone), 'High-level events': e['high_events'], 'Events seen': e['events'],
         })
     return pd.DataFrame(rows)
@@ -72,6 +75,10 @@ def analysis_panel(engine, employee, zone):
     left.metric('Risk level', employee['level'].upper())
     middle.metric('Rolling risk score', f"{employee['risk']:.4f}")
     right.metric('Higher than normal employees', f"{employee['risk_percentile']:.1f}%")
+    if employee.get('peak_ts') and employee.get('peak_level') != employee['level']:
+        st.caption(f"Peak in window: {employee.get('peak_level', '').upper()} "
+                   f"(risk {employee['peak_risk']:.4f}) at {stamp(employee['peak_ts'], zone)}. "
+                   'Current risk is lower because recent activity has returned to normal; the peak keeps the incident visible.')
     st.markdown(report['summary'])
     if report['reasons']:
         st.markdown('**Why: the largest deviations from this employee\'s own normal behaviour**')
@@ -140,22 +147,24 @@ def dashboard():
         finally:
             engine.db.rollback()
         employees, counts = view['employees'], view['counts']
+        ranked = active_ranking(engine, brain, cutoff)
         cols = st.columns(5)
         for col, label, value in zip(cols, ['Employees monitored', 'High risk', 'Medium risk', f'Events scored ({hours} h)', f'High-level events ({hours} h)'],
-                                     [len(employees), sum(e['level'] == 'high' for e in employees), sum(e['level'] == 'medium' for e in employees),
+                                     [len(employees), sum(e['peak_level'] == 'high' for e in ranked), sum(e['peak_level'] == 'medium' for e in ranked),
                                       counts['scored'], counts['high']]):
             col.metric(label, value)
 
         st.subheader('Employee risk ranking')
         b = brain.employee_boundaries_
-        st.caption(f"Risk = time-decayed mean of each employee's recent event anomaly scores (half-life {brain.risk_half_life_hours:g} h); "
-                   f"event counts do not raise risk. Levels come from normal employee behaviour in calibration: "
-                   f"medium ≥ {b['medium']:.4f} (95th percentile), high ≥ {b['high']:.4f} (99th percentile). "
-                   'Select a row to open its AI analysis.')
-        if not employees:
-            st.info('No attributed employee activity yet.')
+        st.caption(f"Ranked by **peak** risk reached in the last {hours} h, so an employee who spiked then went quiet stays "
+                   f"visible; current risk and the peak's time are shown too. Risk = time-decayed mean of an employee's recent "
+                   f"event anomaly scores (half-life {brain.risk_half_life_hours:g} h); event counts do not raise it. Levels come "
+                   f"from normal employee behaviour in calibration: medium ≥ {b['medium']:.4f} (95th percentile), "
+                   f"high ≥ {b['high']:.4f} (99th percentile). The Level badge is the peak level. Select a row to open its AI analysis.")
+        if not ranked:
+            st.info('No attributed employee activity in this window yet.')
         else:
-            frame = ranking_frame(employees, directory, zone)
+            frame = ranking_frame(ranked, directory, zone)
             selection = st.dataframe(frame, hide_index=True, width='stretch', on_select='rerun', selection_mode='single-row',
                                      key='employee_table', height=420)
             options = list(frame.Employee)
@@ -168,7 +177,7 @@ def dashboard():
             employee_id = st.selectbox('Employee to analyse', options, key='analyse_employee',
                                        format_func=lambda e: f"{e} — {directory.employee(e).get('employee_name', '')}")
             st.divider()
-            analysis_panel(engine, next(e for e in employees if e['employee_id'] == employee_id), zone)
+            analysis_panel(engine, next(e for e in ranked if e['employee_id'] == employee_id), zone)
 
         st.divider()
         left, right = st.columns(2)
