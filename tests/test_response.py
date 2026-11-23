@@ -63,6 +63,19 @@ class ResponseTests(unittest.TestCase):
         # Idempotent: a second evaluation creates nothing new.
         self.assertEqual(self.r.evaluate(self.brain), [])
 
+    def test_dashboard_shows_blocked_ip_beside_employee(self):
+        import os
+        from unittest.mock import patch
+        from streamlit.testing.v1 import AppTest
+        root = Path(__file__).resolve().parents[1]
+        self.e.process(activity(now()))
+        self.r.respond('EMP0002', brain=self.brain, peak_risk=self.high + 0.05, created_by='analyst')
+        with patch.dict(os.environ, {'SIX_DATA': self.tmp.name, 'SIX_CONFIG': str(root / 'config.example.json')}):
+            app = AppTest.from_file(str(root / 'app.py')).run(timeout=60)
+        self.assertFalse(app.exception)
+        lines = [m.value for m in app.markdown]
+        self.assertTrue(any(v.startswith('🛡️ EMP0002') and f'⛔ Blocked IP: `{DEVICE}`' in v for v in lines), lines)
+
     def test_revert_sticks_in_auto_mode_until_peak_rises(self):
         self.r.set_mode('auto')
         [rid] = self.r.evaluate(self.brain)

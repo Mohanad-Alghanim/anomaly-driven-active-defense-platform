@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 from monitor.core import Engine, config, now
 from monitor.demo import events as demo_events
-from monitor.views import active_ranking, collector_health, employee_events, snapshot, unattributed_events
+from monitor.views import active_ranking, collector_health, employee_events, employee_ip, snapshot, unattributed_events
 from monitor.lab_readiness import readiness
 from monitor.brain.explain import explain_employee
 from monitor.response import Responder, MODES
@@ -57,7 +57,8 @@ def ranking_frame(employees, directory, zone):
         person = directory.employee(e['employee_id'])
         rows.append({
             'Rank': rank, 'Level': LEVEL_BADGE.get(e.get('peak_level', e['level']), e['level']),
-            'Employee': e['employee_id'], 'Name': person.get('employee_name', ''),
+            'Employee': e['employee_id'], 'IP Address': employee_ip(directory, e['employee_id'], e.get('last_ip')),
+            'Name': person.get('employee_name', ''),
             'Department': person.get('department', ''), 'Job title': person.get('job_title', ''),
             'Peak risk': round(e['peak_risk'], 4), 'Peak time': stamp(e.get('peak_ts'), zone),
             'Current risk': round(e['risk'], 4), 'Current level': LEVEL_BADGE.get(e['level'], e['level']),
@@ -81,6 +82,11 @@ def analysis_panel(engine, employee, zone):
                    f"(risk {employee['peak_risk']:.4f}) at {stamp(employee['peak_ts'], zone)}. "
                    'Current risk is lower because recent activity has returned to normal; the peak keeps the incident visible.')
     st.markdown(report['summary'])
+    key_ip = report['key_events'][0].get('ip') if report.get('key_events') else None
+    if key_ip:
+        device = directory.devices.get(key_ip, {})
+        host = f" ({device['hostname']}, {device.get('device_type', '')})" if device.get('hostname') else ''
+        st.markdown(f"**Device IP of the most influential event:** `{key_ip}`{host}")
     if report['reasons']:
         st.markdown('**Why: the largest deviations from this employee\'s own normal behaviour**')
         st.markdown('\n'.join(f"- **{r['label']}** — {r['text']}" for r in report['reasons']))
@@ -147,7 +153,7 @@ def response_section(engine, path, directory, brain, zone):
             cols = st.columns([3, 2, 1])
             person = directory.employee(c['employee_id'])
             cols[0].write(f"{c['employee_id']} — {person.get('employee_name','')} ({person.get('department','')})")
-            cols[1].write(f"peak {c['peak_risk']:.3f} · {c['source_ip'] or 'no device IP'}")
+            cols[1].write(f"peak {c['peak_risk']:.3f} · IP to block: `{c['source_ip'] or 'no device IP'}`")
             if cols[2].button('Respond', key=f"respond_{c['employee_id']}"):
                 response_write(path, lambda r, e=c['employee_id'], pk=c['peak_risk']:
                                r.respond(e, brain=r.engine.brain, peak_risk=pk, created_by='analyst'))
@@ -158,8 +164,10 @@ def response_section(engine, path, directory, brain, zone):
         for r in active:
             cols = st.columns([3, 3, 1])
             person = directory.employee(r['employee_id'])
-            acts = ', '.join(json.loads(r['actions']))
-            cols[0].write(f"🛡️ {r['employee_id']} — {person.get('employee_name','')} · `{r['source_ip']}`")
+            actions = json.loads(r['actions'])
+            acts = ', '.join(actions)
+            ip_label = ('⛔ Blocked IP' if 'block_ip' in actions else 'Device IP') + f": `{r['source_ip'] or 'no device IP'}`"
+            cols[0].write(f"🛡️ {r['employee_id']} — {person.get('employee_name','')} · {ip_label}")
             cols[0].caption(f"{acts} · by {r['created_by']} · {stamp(r['created_ts'], zone)}")
             cols[1].caption(r['reason'] or '')
             if cols[2].button('Unblock / Reinstate', key=f"revert_{r['id']}"):

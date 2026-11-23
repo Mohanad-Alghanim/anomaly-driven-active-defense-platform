@@ -11,7 +11,7 @@ import numpy as np
 
 from monitor.core import Engine, RETIRED_RULE_KEYS, collect, config, parse
 from monitor.demo import events as demo_events
-from monitor.views import active_ranking, employee_table, snapshot
+from monitor.views import active_ranking, device_ips, employee_ip, employee_table, snapshot
 
 ROOT = Path(__file__).resolve().parents[1]
 DEVICE = '10.200.0.10'      # DEV0001-1 -> EMP0001
@@ -74,6 +74,24 @@ class MonitorTests(unittest.TestCase):
         later = active_ranking(self.e, brain, base + 3600)
         emp2 = next(e for e in later if e['employee_id'] == 'EMP0002')
         self.assertLess(emp2['peak_risk'], ranked[0]['peak_risk'])
+
+    def test_ranking_reports_ip_of_latest_event_for_display_only(self):
+        base = 1794042000
+        self.e.process(activity(base, ip='10.200.0.11'))            # DEV0002-1 -> EMP0002
+        self.e.process(activity(base + 600, ip='10.200.0.12'))      # DEV0002-2 -> EMP0002 (latest)
+        self.e.process(activity(base + 300))                        # EMP0001
+        ranked = {e['employee_id']: e for e in active_ranking(self.e, self.e.brain, base - 1)}
+        self.assertEqual(ranked['EMP0002']['last_ip'], '10.200.0.12')
+        self.assertEqual(ranked['EMP0001']['last_ip'], DEVICE)
+        directory = self.e.directory
+        self.assertEqual(device_ips(directory, 'EMP0002'), ['10.200.0.11', '10.200.0.12'])
+        self.assertEqual(employee_ip(directory, 'EMP0002', '10.200.0.12'), '10.200.0.12')
+        self.assertEqual(employee_ip(directory, 'EMP0002'), '10.200.0.11, 10.200.0.12')
+        self.assertEqual(employee_ip(directory, 'NOBODY'), '')
+        # The IP is display context only: it never reaches the model's inputs.
+        self.assertFalse({'ip', 'source_ip', 'last_ip'} & set(self.e.brain.feature_names))
+        features = json.loads(self.e.rows('events')[0]['features'])
+        self.assertFalse(any('ip' == k or k.endswith('_ip') for k in features))
 
     def test_unusual_behaviour_scores_higher_than_routine(self):
         base = 1794042000 + 3 * 3600   # 06:00 local (Riyadh) on a working day
@@ -243,6 +261,10 @@ class MonitorTests(unittest.TestCase):
             self.assertTrue(np.all(np.diff(ranking['Peak risk'].to_numpy()) <= 0))
             self.assertIn('Current risk', ranking.columns)
             self.assertIn('Peak time', ranking.columns)
+            columns = list(ranking.columns)
+            self.assertEqual(columns[columns.index('Employee') + 1], 'IP Address')
+            self.assertTrue(ranking['IP Address'].str.match(r'^\d+\.\d+\.\d+\.\d+').all())
+            self.assertTrue(any(m.value.startswith('**Device IP of the most influential event:**') for m in app.markdown))
             self.assertTrue(ranking['Level'].iloc[0].endswith('HIGH'))
             self.assertTrue(any(h.value.startswith('AI analysis — ' + ranking['Employee'].iloc[0]) for h in app.subheader))
             self.assertTrue(any('standard deviations' in m.value for m in app.markdown))
