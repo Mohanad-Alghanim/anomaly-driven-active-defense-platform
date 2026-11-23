@@ -130,6 +130,23 @@ class AttackScenarioTests(unittest.TestCase):
             self.assertIn('tamper', message.lower())
             self.assertNotEqual(watched.read_text(), before)
 
+    def test_sql_message_states_rows_returned_truthfully(self):
+        from monitor.lab import Catalog, CATALOG_ROWS
+        catalog = Catalog()
+        try:
+            results = catalog.search(sql_injection.INJECTION)        # the lab's real query
+        finally:
+            catalog.close()
+        self.assertEqual(results, ['pencil'])
+        note = sql_injection.describe(results)
+        self.assertIn(f"returned 1 of {len(CATALOG_ROWS)} catalog rows: 'pencil'.", note)
+        self.assertIn('not dumped', note)
+        self.assertNotIn('every row', note)
+        full = sql_injection.describe(list(CATALOG_ROWS))
+        self.assertIn("returned 2 of 2 catalog rows: 'pencil', 'notebook'.", full)
+        self.assertIn('every row', full)
+        self.assertIn('returned 0 of 2 catalog rows: none.', sql_injection.describe([]))
+
     def test_sql_action_handles_unreachable_target(self):
         # No lab web server in the test environment: the action must degrade, not raise.
         note = sql_injection.action(types.SimpleNamespace())

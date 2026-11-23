@@ -121,8 +121,11 @@ all six events (plus the one file-integrity change) and the ranking came out exa
 | 5 | EMP0009 (James Rodriguez, Engineering) | Out-of-role snooping | 0.510 | 🟠 MEDIUM | Accessed the **File Server**, out of role, at small volume |
 | 6 | EMP0101 (William Smith, Operations) | Credential misuse | 0.507 | 🟠 MEDIUM | Active at 03:07, far from their usual time of day |
 
-The SQL-injection script also really executed `pencil' OR '1'='1` against the lab's disposable SQLite
-catalog and received every row back, and the sabotage script really appended a tamper line to the
+The SQL-injection script also really sent `pencil' OR '1'='1` to the lab's disposable SQLite catalog
+(two rows: `pencil`, `notebook`). The payload broke out of the string literal and the injected `OR`
+clause was executed, but the lab appends `%'` after the input, so the query ran as
+`... LIKE '%pencil' OR '1'='1%'`; `'1'='1%'` is false, so it returned **1 of 2 rows (`pencil`)** — the
+same as a normal search, not a dump of the catalog. The script now prints exactly this. The sabotage script really appended a tamper line to the
 watched file, which the collector flagged as an unauthorised content change.
 
 ### Before

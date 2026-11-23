@@ -33,11 +33,15 @@ def append(path, text):
         handle.write(text)
 
 
+CATALOG_ROWS = ('pencil', 'notebook')   # the whole disposable lab catalog
+
+
 class Catalog:
     """Deliberate SQL injection in a disposable in-memory catalog, without secrets."""
     def __init__(self):
         self.db=sqlite3.connect(':memory:')
-        self.db.executescript("CREATE TABLE catalog(name TEXT); INSERT INTO catalog VALUES ('pencil'),('notebook');")
+        self.db.execute('CREATE TABLE catalog(name TEXT)')
+        self.db.executemany('INSERT INTO catalog VALUES (?)', [(name,) for name in CATALOG_ROWS])
         self.db.set_progress_handler(lambda: 1, 10000)
 
     def search(self, query):

@@ -4,9 +4,12 @@ Behavioural signal: a Database access with an abnormal response time and payload
 size, from an employee who does not normally query the database. Loud by design.
 
 Where the lab web target is running, the script also sends a genuine injection to
-its disposable in-memory SQLite catalog (http://127.0.0.1:<web_port>/search), proving
-real execution; that request is logged against 127.0.0.1 and is not attributed to the
-employee. The employee-attributed signal is the Database telemetry below.
+its disposable in-memory SQLite catalog (http://127.0.0.1:<web_port>/search) and
+reports exactly which rows came back. With the current payload the injected OR clause
+is executed but evaluates false (the lab appends %' after the input), so only 'pencil'
+is returned — the same as a normal search. That request is logged against 127.0.0.1
+and is not attributed to the employee. The employee-attributed signal is the Database
+telemetry below.
 
     python -m monitor.attacks.sql_injection --employee EMP0234
 """
@@ -48,9 +51,20 @@ def action(args):
         return f'lab returned HTTP {exc.code}; telemetry still emitted'
     except (urllib.error.URLError, OSError, ValueError) as exc:
         return f'lab web target not reachable on 127.0.0.1:{port} ({exc}); telemetry still emitted'
-    results = payload.get('results', [])
-    return (f"injected {INJECTION!r} into the lab catalog; it returned {len(results)} rows "
-            f"{results} (the ' OR '1'='1 made every row match — real SQLi executed)")
+    return describe(payload.get('results', []))
+
+
+def describe(results):
+    """State exactly what the lab returned and whether the injection widened the query."""
+    from ..lab import CATALOG_ROWS
+    names = ', '.join(repr(r) for r in results) or 'none'
+    head = (f"injected {INJECTION!r} into the lab catalog; it returned {len(results)} of "
+            f"{len(CATALOG_ROWS)} catalog rows: {names}.")
+    if set(results) >= set(CATALOG_ROWS):
+        return head + ' The injected OR clause widened the query to every row in the catalog.'
+    return (head + " The payload broke out of the string literal and the OR clause ran, but the lab "
+            "appends %' after the input, so the clause became '1'='1%' (false): the result is the "
+            "same as a normal search for 'pencil' and the catalog was not dumped.")
 
 
 def build(directory, source_ip, person, args):
