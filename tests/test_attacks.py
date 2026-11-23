@@ -137,14 +137,14 @@ class AttackScenarioTests(unittest.TestCase):
             results = catalog.search(sql_injection.INJECTION)        # the lab's real query
         finally:
             catalog.close()
-        self.assertEqual(results, ['pencil'])
+        self.assertEqual(set(results), set(CATALOG_ROWS))            # the payload really dumps the catalog
         note = sql_injection.describe(results)
-        self.assertIn(f"returned 1 of {len(CATALOG_ROWS)} catalog rows: 'pencil'.", note)
-        self.assertIn('not dumped', note)
-        self.assertNotIn('every row', note)
-        full = sql_injection.describe(list(CATALOG_ROWS))
-        self.assertIn("returned 2 of 2 catalog rows: 'pencil', 'notebook'.", full)
-        self.assertIn('every row', full)
+        self.assertIn("returned 2 of 2 catalog rows: 'pencil', 'notebook'.", note)
+        self.assertIn('widened the query to every row', note)
+        partial = sql_injection.describe(['pencil'])
+        self.assertIn("returned 1 of 2 catalog rows: 'pencil'.", partial)
+        self.assertIn('not dumped', partial)
+        self.assertNotIn('every row', partial)
         self.assertIn('returned 0 of 2 catalog rows: none.', sql_injection.describe([]))
 
     def test_sql_action_handles_unreachable_target(self):
