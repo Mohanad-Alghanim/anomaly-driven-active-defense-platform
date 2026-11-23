@@ -63,6 +63,30 @@ class ResponseTests(unittest.TestCase):
         # Idempotent: a second evaluation creates nothing new.
         self.assertEqual(self.r.evaluate(self.brain), [])
 
+    def test_blocks_the_ip_that_raised_the_risk_not_the_first_device(self):
+        from monitor.brain.explain import explain_employee
+        from monitor.views import employee_events, risk_source_ip
+        second = '10.200.0.12'                                     # DEV0002-2 -> EMP0002
+        base = now() - 7200
+        self.e.process(activity(base))
+        self.e.process(activity(base + 600, ip=second, destination_ip='10.20.1.20', destination_port=5432,
+                                bytes_in=60000, bytes_out=9000000, response_time_ms=1500))
+        self.e.process(activity(base + 1200))                       # latest event back on the first device
+        self.r.respond('EMP0002', brain=self.brain, peak_risk=self.high + 0.05)
+        blocked = self.r.active_responses()[0]['source_ip']
+        self.assertEqual(blocked, second)
+        self.assertIn(second, json.loads(self.e.enforcement_path.read_text())['blocked_ips'])
+        self.assertNotIn(DEVICE, json.loads(self.e.enforcement_path.read_text())['blocked_ips'])
+        # Same address as the ranking column and the AI analysis line.
+        self.assertEqual(risk_source_ip(self.e, self.brain, 'EMP0002'), blocked)
+        row = dict(employee_id='EMP0002', risk=self.high, level='high', risk_percentile=99.0)
+        report = explain_employee(self.brain, self.e.directory, row, employee_events(self.e, 'EMP0002'))
+        self.assertEqual(report['key_events'][0]['ip'], blocked)
+
+    def test_without_events_falls_back_to_the_directory_device(self):
+        self.r.respond('EMP0002', brain=self.brain, peak_risk=self.high + 0.05)
+        self.assertEqual(self.r.active_responses()[0]['source_ip'], DEVICE)
+
     def test_dashboard_shows_blocked_ip_beside_employee(self):
         import os
         from unittest.mock import patch
@@ -75,6 +99,8 @@ class ResponseTests(unittest.TestCase):
         self.assertFalse(app.exception)
         lines = [m.value for m in app.markdown]
         self.assertTrue(any(v.startswith('🛡️ EMP0002') and f'⛔ Blocked IP: `{DEVICE}`' in v for v in lines), lines)
+        ranking = next(f.value for f in app.dataframe if 'IP Address' in f.value.columns)
+        self.assertEqual(ranking.set_index('Employee').loc['EMP0002', 'IP Address'], DEVICE)
 
     def test_revert_sticks_in_auto_mode_until_peak_rises(self):
         self.r.set_mode('auto')

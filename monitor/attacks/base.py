@@ -77,17 +77,33 @@ def _work_bounds(person):
     return minutes(person.get('work_start', '08:00')), minutes(person.get('work_end', '16:00'))
 
 
-def _recent_workday_at(directory, hour_local, minute=0):
-    """The most recent past local datetime at `hour_local` on a non-weekend workday.
+SCENARIO_WEEKDAY = 2   # Wednesday: mid-week, a workday in the lab directory
 
-    Scenarios land on a workday so the behaviour the brain sees is the scenario's own
-    signal, not the independent 'weekend' deviation of whatever day the demo is run.
+
+def _scenario_weekday(directory):
+    """The fixed weekday scenarios land on (a workday, never a weekend day)."""
+    day = SCENARIO_WEEKDAY
+    for _ in range(7):
+        if day not in directory.weekend_days:
+            return day
+        day = (day - 1) % 7
+    return SCENARIO_WEEKDAY
+
+
+def _recent_workday_at(directory, hour_local, minute=0):
+    """The most recent past local datetime at `hour_local` on the fixed scenario weekday.
+
+    Day of week is a model feature, so a scenario's level would otherwise drift with the
+    day the demo is run. Pinning the weekday (a mid-week workday, so no 'weekend'
+    deviation either) makes every scenario score the same on any day; it is always
+    within the past 7 days, inside the dashboard's default window.
     """
     zone = ZoneInfo(directory.timezone)
-    now_local = datetime.now(timezone.utc).astimezone(zone)
+    weekday = _scenario_weekday(directory)
+    now_local = datetime.fromtimestamp(now_ts(), timezone.utc).astimezone(zone)
     local = now_local.replace(hour=hour_local % 24, minute=minute, second=0, microsecond=0)
     for _ in range(8):
-        if local < now_local and local.weekday() not in directory.weekend_days:
+        if local < now_local and local.weekday() == weekday:
             return local.timestamp()
         local -= timedelta(days=1)
     return local.timestamp()
@@ -103,6 +119,23 @@ def within_hours_ts(directory, person):
 def off_hours_ts(directory, person, hour_local=3):
     """A recent workday timestamp at `hour_local` local time, outside the schedule."""
     return _recent_workday_at(directory, hour_local, 7)
+
+
+def opposite_habit_hour(person):
+    """Local hour farthest from the employee's usual time of day (their baseline mean
+    activity hour + 12 h). Falls back to the opposite of the schedule midpoint."""
+    try:
+        from ..brain.runtime import load_brain
+        habit = load_brain().baseline_.hour(person.get('employee_id'))
+    except Exception:
+        habit = None
+    if habit is not None:
+        import math
+        usual = (habit[0] % (2 * math.pi)) * 24 / (2 * math.pi)
+    else:
+        start, end = _work_bounds(person)
+        usual = (start + end) / 2 if end > start else 12
+    return int(round(usual + 12)) % 24
 
 
 # ---------------------------------------------------------------- record building

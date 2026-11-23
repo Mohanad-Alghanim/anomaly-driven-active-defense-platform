@@ -49,17 +49,15 @@ def active_ranking(engine, brain, cutoff):
     high_boundary = brain.boundaries_['high']
     marks = ','.join('?' * len(recent))
     rows = engine.db.execute(
-        f'SELECT employee_id, ts, score, ip FROM events WHERE employee_id IN ({marks}) AND score IS NOT NULL '
+        f'SELECT employee_id, ts, score FROM events WHERE employee_id IN ({marks}) AND score IS NOT NULL '
         'ORDER BY ts, rowid', recent).fetchall()
     states, agg = {}, {}
-    for emp, ts, score, ip in rows:
+    for emp, ts, score in rows:
         risk = states.setdefault(emp, RiskState()).update(ts, score, half_life)
         a = agg.get(emp)
         if a is None:
             a = agg[emp] = dict(peak_risk=None, peak_ts=None, risk=risk, last_ts=ts, events=0, high_events=0, max_score=score)
         a['risk'], a['last_ts'] = risk, ts
-        if ip:
-            a['last_ip'] = ip   # display only: the device the latest event came from
         if ts >= cutoff:
             a['events'] += 1
             a['high_events'] += int(score >= high_boundary)
@@ -73,8 +71,7 @@ def active_ranking(engine, brain, cutoff):
             employee_id=emp, risk=a['risk'], level=str(brain.employee_levels([a['risk']])[0]),
             risk_percentile=float(brain.employee_percentile([a['risk']])[0]),
             peak_risk=peak, peak_level=str(brain.employee_levels([peak])[0]), peak_ts=a['peak_ts'],
-            last_ts=a['last_ts'], last_ip=a.get('last_ip'), events=a['events'], high_events=a['high_events'],
-            max_score=a['max_score']))
+            last_ts=a['last_ts'], events=a['events'], high_events=a['high_events'], max_score=a['max_score']))
     out.sort(key=lambda e: (e['peak_risk'], e['risk']), reverse=True)
     return out
 
@@ -84,11 +81,20 @@ def device_ips(directory, employee_id):
     return [d['source_ip'] for d in directory.data.get('devices', []) if d.get('employee_id') == employee_id]
 
 
-def employee_ip(directory, employee_id, last_ip=None):
-    """IP shown for an employee: the device their latest event came from, otherwise all
-    of their directory device IPs, comma-separated. Never a model input."""
-    if last_ip:
-        return last_ip
+def risk_source_ip(engine, brain, employee_id):
+    """Source IP of the event weighing most on the employee's risk (the AI analysis key
+    event). The ranking, the AI analysis and active defense all use this one address, so
+    the IP shown is the IP blocked. Display/enforcement only: never a model input."""
+    from .brain.explain import key_event
+    event = key_event(brain, employee_events(engine, employee_id))
+    return event.get('ip') if event else None
+
+
+def employee_ip(directory, employee_id, risk_ip=None):
+    """IP shown for an employee: the device the risk-raising event came from, otherwise
+    all of their directory device IPs, comma-separated."""
+    if risk_ip:
+        return risk_ip
     return ', '.join(device_ips(directory, employee_id))
 
 

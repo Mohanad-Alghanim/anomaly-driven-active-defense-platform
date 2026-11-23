@@ -75,6 +75,36 @@ class AttackScenarioTests(unittest.TestCase):
                           f'{module.__name__} ({employee}) projected '
                           f"{projection['projected_employee_level']}, expected one of {acceptable}")
 
+    @unittest.skipUnless(MODEL_PRESENT, 'committed brain required')
+    def test_projected_gradient_is_the_same_on_any_day(self):
+        """Day of week is a model feature: the scenarios must not drift with the run date."""
+        from datetime import datetime
+        from unittest.mock import patch
+        from zoneinfo import ZoneInfo
+        zone = ZoneInfo(self.directory.timezone)
+        for day in range(14):                       # two full weeks, every weekday incl. weekends
+            for hour in (0, 12, 23):
+                run_at = datetime(2026, 11, 9 + day, hour, 3, tzinfo=zone).timestamp()
+                with patch.object(base, 'now_ts', return_value=run_at):
+                    for module, employee, acceptable in CASES:
+                        _, records = self._build(module, employee)
+                        self.assertTrue(all(r['ts'] < run_at for r in records))
+                        self.assertTrue(all(run_at - r['ts'] <= 7 * 86400 for r in records))
+                        level = base.project_levels(records)['projected_employee_level']
+                        self.assertIn(level, acceptable, f'{module.__name__} run on {datetime.fromtimestamp(run_at, zone)}')
+
+    def test_credential_misuse_hour_is_opposite_the_employees_habit(self):
+        from datetime import datetime
+        from monitor.brain.runtime import load_brain
+        habit = load_brain().baseline_.hour('EMP0101')
+        usual = (habit[0] % (2 * 3.141592653589793)) * 24 / (2 * 3.141592653589793)
+        hour = base.opposite_habit_hour(base.employee(self.directory, 'EMP0101'))
+        self.assertGreaterEqual(min(abs(hour - usual) % 24, 24 - abs(hour - usual) % 24), 11.5)
+        _, records = self._build(credential_misuse, 'EMP0101')
+        local = datetime.fromtimestamp(records[0]['ts'], __import__('zoneinfo').ZoneInfo(self.directory.timezone))
+        self.assertEqual(local.hour, hour)
+        self.assertNotIn(local.weekday(), self.directory.weekend_days)
+
     def test_emit_appends_jsonl(self):
         with tempfile.TemporaryDirectory() as tmp:
             inbox = Path(tmp) / 'telemetry.jsonl'

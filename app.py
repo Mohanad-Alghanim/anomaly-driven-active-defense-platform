@@ -8,7 +8,8 @@ import pandas as pd
 import streamlit as st
 from monitor.core import Engine, config, now
 from monitor.demo import events as demo_events
-from monitor.views import active_ranking, collector_health, employee_events, employee_ip, snapshot, unattributed_events
+from monitor.views import (active_ranking, collector_health, employee_events, employee_ip, risk_source_ip, snapshot,
+                           unattributed_events)
 from monitor.lab_readiness import readiness
 from monitor.brain.explain import explain_employee
 from monitor.response import Responder, MODES
@@ -51,13 +52,13 @@ def run_demo(engine):
     engine.ingest(prepared)
 
 
-def ranking_frame(employees, directory, zone):
+def ranking_frame(engine, employees, directory, zone):
     rows = []
     for rank, e in enumerate(employees, 1):
         person = directory.employee(e['employee_id'])
         rows.append({
             'Rank': rank, 'Level': LEVEL_BADGE.get(e.get('peak_level', e['level']), e['level']),
-            'Employee': e['employee_id'], 'IP Address': employee_ip(directory, e['employee_id'], e.get('last_ip')),
+            'Employee': e['employee_id'], 'IP Address': employee_ip(directory, e['employee_id'], risk_source_ip(engine, engine.brain, e['employee_id'])),
             'Name': person.get('employee_name', ''),
             'Department': person.get('department', ''), 'Job title': person.get('job_title', ''),
             'Peak risk': round(e['peak_risk'], 4), 'Peak time': stamp(e.get('peak_ts'), zone),
@@ -261,7 +262,7 @@ def dashboard():
         if not ranked:
             st.info('No attributed employee activity in this window yet.')
         else:
-            frame = ranking_frame(ranked, directory, zone)
+            frame = ranking_frame(engine, ranked, directory, zone)
             selection = st.dataframe(frame, hide_index=True, width='stretch', on_select='rerun', selection_mode='single-row',
                                      key='employee_table', height=420)
             options = list(frame.Employee)

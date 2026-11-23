@@ -75,23 +75,25 @@ class MonitorTests(unittest.TestCase):
         emp2 = next(e for e in later if e['employee_id'] == 'EMP0002')
         self.assertLess(emp2['peak_risk'], ranked[0]['peak_risk'])
 
-    def test_ranking_reports_ip_of_latest_event_for_display_only(self):
+    def test_risk_ip_is_the_device_of_the_risk_raising_event(self):
+        from monitor.views import risk_source_ip
         base = 1794042000
-        self.e.process(activity(base, ip='10.200.0.11'))            # DEV0002-1 -> EMP0002
-        self.e.process(activity(base + 600, ip='10.200.0.12'))      # DEV0002-2 -> EMP0002 (latest)
-        self.e.process(activity(base + 300))                        # EMP0001
-        ranked = {e['employee_id']: e for e in active_ranking(self.e, self.e.brain, base - 1)}
-        self.assertEqual(ranked['EMP0002']['last_ip'], '10.200.0.12')
-        self.assertEqual(ranked['EMP0001']['last_ip'], DEVICE)
-        directory = self.e.directory
+        for i in range(5):                                          # routine work on DEV0002-1
+            self.e.process(activity(base + i * 1800, ip='10.200.0.11'))
+        self.e.process(activity(base + 9000, ip='10.200.0.12', destination_ip='10.20.1.20', destination_port=5432,
+                                bytes_in=60000, bytes_out=9000000, response_time_ms=1500))   # spike on DEV0002-2
+        self.e.process(activity(base + 9600, ip='10.200.0.11'))     # latest event: routine, first device
+        brain, directory = self.e.brain, self.e.directory
+        self.assertEqual(risk_source_ip(self.e, brain, 'EMP0002'), '10.200.0.12')
+        self.assertIsNone(risk_source_ip(self.e, brain, 'EMP0003'))
         self.assertEqual(device_ips(directory, 'EMP0002'), ['10.200.0.11', '10.200.0.12'])
         self.assertEqual(employee_ip(directory, 'EMP0002', '10.200.0.12'), '10.200.0.12')
         self.assertEqual(employee_ip(directory, 'EMP0002'), '10.200.0.11, 10.200.0.12')
         self.assertEqual(employee_ip(directory, 'NOBODY'), '')
-        # The IP is display context only: it never reaches the model's inputs.
-        self.assertFalse({'ip', 'source_ip', 'last_ip'} & set(self.e.brain.feature_names))
+        # The IP is display/enforcement context only: it never reaches the model's inputs.
+        self.assertFalse({'ip', 'source_ip'} & set(brain.feature_names))
         features = json.loads(self.e.rows('events')[0]['features'])
-        self.assertFalse(any('ip' == k or k.endswith('_ip') for k in features))
+        self.assertFalse(any(k == 'ip' or k.endswith('_ip') for k in features))
 
     def test_unusual_behaviour_scores_higher_than_routine(self):
         base = 1794042000 + 3 * 3600   # 06:00 local (Riyadh) on a working day

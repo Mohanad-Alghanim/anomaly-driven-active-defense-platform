@@ -119,6 +119,14 @@ def _zone(directory):
     return ZoneInfo(directory.timezone)
 
 
+def key_event(brain, events):
+    """The scored event weighing most on the employee's rolling risk, or None."""
+    scored = [dict(e) for e in events if e.get('score') is not None]
+    if not scored:
+        return None
+    return _contributions(scored, brain.half_life_seconds, float(np.median(brain.calibration_scores_)))[0]
+
+
 def explain_employee(brain, directory, risk_row, events):
     """risk_row: row from employee_risk; events: rows from views.employee_events."""
     employee_id = risk_row['employee_id']

@@ -7,7 +7,8 @@ is applied automatically; in 'manual' mode it waits for the analyst; 'disabled' 
 kill-switch (nothing new fires, existing responses remain until reverted).
 
 Two actions, both loopback-only and reversible:
-  * block_ip    — add the employee's device IP to runtime/lab/enforcement.json. The
+  * block_ip    — add the IP of the device that raised the employee's risk to
+                  runtime/lab/enforcement.json. The
                   loopback lab target honours this list (403) and the collector marks
                   any further telemetry from that IP as BLOCKED, so it no longer raises
                   risk. No real host firewall is touched.
@@ -53,10 +54,17 @@ class Responder:
 
     # ------------------------------------------------------------------ device lookup
     def _source_ip(self, employee_id):
-        for device in self.directory.data.get('devices', []):
-            if device.get('employee_id') == employee_id:
-                return device['source_ip']
-        return None
+        """The IP to block: the device the risk-raising event came from (the same address
+        the dashboard shows), else the employee's first directory device."""
+        try:
+            from .views import risk_source_ip
+            ip = risk_source_ip(self.engine, self.engine.brain, employee_id)
+        except (OSError, ValueError, RuntimeError):
+            ip = None
+        owners = {d['source_ip'] for d in self.directory.data.get('devices', []) if d.get('employee_id') == employee_id}
+        if ip and ip in owners:
+            return ip
+        return next((d['source_ip'] for d in self.directory.data.get('devices', []) if d.get('employee_id') == employee_id), None)
 
     # ------------------------------------------------------------------ candidates
     def candidates(self, brain):

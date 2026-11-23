@@ -31,6 +31,12 @@ The stealthy scenarios lean on one small deviation from the employee's own habit
 they sit at MEDIUM — that is the honest limit the Phase 1 "artifact-free floor" measures, and the
 reason they are included.
 
+> **Same result on any day.** Day of week is a model feature, so every scenario lands on a fixed
+> mid-week workday (the most recent Wednesday, always within the last 7 days) instead of "the most
+> recent workday". `credential_misuse` uses the hour opposite the employee's own baseline activity
+> hour (their mean hour + 12 h; 00:07 for EMP0101) rather than a fixed 03:07, so it stays MEDIUM
+> whatever day the demo is run. `tests/test_attacks.py` checks all six across two full weeks.
+
 > **Expected vs. actual.** The printed expected level is the scenario's design intent for a
 > well-chosen employee, not a guarantee: a value far from one employee's baseline may be ordinary
 > for another. The brain is always the authority. Each script also prints a local *projection* of
